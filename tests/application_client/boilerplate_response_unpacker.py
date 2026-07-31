@@ -74,3 +74,18 @@ def unpack_sign_tx_response(response: bytes) -> tuple[int, bytes, int]:
     assert len(response) == 0
 
     return der_sig_len, der_sig, int.from_bytes(v, byteorder="big")
+
+
+# Unpack the SIGN_TX_MLDSA response:
+# response = pk_len (2, big-endian)
+#            pk (pk_len)
+#            sig_len (2, big-endian)
+#            sig (sig_len)
+def unpack_sign_tx_mldsa_response(response: bytes) -> tuple[bytes, bytes]:
+    pk_len = int.from_bytes(response[:2], byteorder="big")
+    pk = response[2 : 2 + pk_len]
+    rest = response[2 + pk_len :]
+    sig_len = int.from_bytes(rest[:2], byteorder="big")
+    sig = rest[2 : 2 + sig_len]
+    assert len(rest) == 2 + sig_len, f"trailing bytes in MLDSA response: {len(rest) - 2 - sig_len}"
+    return pk, sig

@@ -56,7 +56,9 @@ endif
 # Possibles curves are: secp256k1, secp256r1, ed25519 and bls12381g1
 # If your app needs it, you can specify multiple curves by using:
 # `CURVE_APP_LOAD_PARAMS = <curve1> <curve2>`
-CURVE_APP_LOAD_PARAMS = secp256k1
+# ed25519 is required by the SLIP-0010 mode used to derive the ML-DSA seed
+# (see src/ui/action/validate.c). Not used for on-curve signing.
+CURVE_APP_LOAD_PARAMS = secp256k1 ed25519
 
 # Application allowed derivation paths.
 # You should request a specific path for your app.
@@ -146,6 +148,16 @@ ENABLE_STACK_PROTECTOR = 1
 # default enabled in the SDK `Makefile.standard_app`.
 #DISABLE_STANDARD_APP_FILES = 1
 #DISABLE_DEFAULT_IO_SEPROXY_BUFFER_SIZE = 1 # To allow custom size declaration
+
+# Enlarge the APDU I/O buffer so ML-DSA-44 responses (pk 1312 B + sig 2420 B +
+# 4 length bytes = 3736 B) fit in a single response.
+DISABLE_DEFAULT_IO_SEPROXY_BUFFER_SIZE = 1
+DEFINES += CUSTOM_IO_APDU_BUFFER_SIZE=4096
+
+# ML-DSA is provided as source in lib_cxng/src (not exported via cx.export),
+# so pull the sources in and expose the internal headers.
+SDK_SOURCE_FILES += $(wildcard $(BOLOS_SDK)/lib_cxng/src/cx_mldsa*.c)
+INCLUDES_PATH += $(BOLOS_SDK)/lib_cxng/src
 #DISABLE_STANDARD_APP_DEFINES = 1 # Will set all the following disablers
 #DISABLE_STANDARD_SNPRINTF = 1
 #DISABLE_STANDARD_USB = 1

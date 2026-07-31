@@ -20,8 +20,10 @@
  *   Whether more APDU chunk to be received or not.
  * @param[in]   is_token_tx
  *  Whether the transaction to sign is a token transaction or not.
+ * @param[in]   is_mldsa
+ *  Whether the transaction must be signed with ML-DSA-44 instead of ECDSA.
  *
  * @return zero or positive integer if success, negative integer otherwise.
  *
  */
-int handler_sign_tx(buffer_t *cdata, uint8_t chunk, bool more, bool is_token_tx);
+int handler_sign_tx(buffer_t *cdata, uint8_t chunk, bool more, bool is_token_tx, bool is_mldsa);

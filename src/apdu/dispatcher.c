@@ -74,7 +74,9 @@ int apdu_dispatcher(const command_t *cmd) {
 
         case SIGN_TX:
         case SIGN_TOKEN_TX:
-            // Common handler for both SIGN_TX and SIGN_TOKEN_TX, the content is very similar
+        case SIGN_TX_MLDSA:
+            // Common handler for SIGN_TX / SIGN_TOKEN_TX / SIGN_TX_MLDSA: chunked upload of
+            // BIP32 path + raw transaction. Only the signing algorithm differs at approval time.
             PRINTF("APDU_DISPATCHER: %d\n", cmd->ins);
             if ((cmd->p1 == P1_START && cmd->p2 != P2_MORE) ||  //
                 cmd->p1 > P1_MAX ||                             //
@@ -90,12 +92,11 @@ int apdu_dispatcher(const command_t *cmd) {
             buf.size = cmd->lc;
             buf.offset = 0;
 
-            // We could have written a handler_sign_token_tx but in our example token TX are very
-            // simple so we just reuse handler_sign_tx + a boolean.
             return handler_sign_tx(&buf,
                                    cmd->p1,
                                    (bool) (cmd->p2 & P2_MORE),
-                                   cmd->ins == SIGN_TOKEN_TX);
+                                   cmd->ins == SIGN_TOKEN_TX,
+                                   cmd->ins == SIGN_TX_MLDSA);
 
         case PROVIDE_TOKEN_INFO:
             if (cmd->p1 != 0 || cmd->p2 != 0) {

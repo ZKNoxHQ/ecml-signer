@@ -51,3 +51,23 @@ int helper_send_response_sig() {
 
     return io_send_response_pointer(resp, offset, SWO_SUCCESS);
 }
+
+int helper_send_response_mldsa_sig() {
+    // Response layout: pk_len(2 BE) || pk || sig_len(2 BE) || sig
+    // Build in place inside tx_info by shifting bytes; but simpler: assemble
+    // in a stack buffer sized for MLDSA-44's max response.
+    uint8_t resp[2 + MLDSA44_PUBLICKEYBYTES + 2 + MLDSA44_SIGBYTES] = {0};
+    size_t offset = 0;
+
+    resp[offset++] = (uint8_t) (MLDSA44_PUBLICKEYBYTES >> 8);
+    resp[offset++] = (uint8_t) (MLDSA44_PUBLICKEYBYTES & 0xFF);
+    memmove(resp + offset, G_context.tx_info.mldsa_pk, MLDSA44_PUBLICKEYBYTES);
+    offset += MLDSA44_PUBLICKEYBYTES;
+
+    resp[offset++] = (uint8_t) (G_context.tx_info.mldsa_sig_len >> 8);
+    resp[offset++] = (uint8_t) (G_context.tx_info.mldsa_sig_len & 0xFF);
+    memmove(resp + offset, G_context.tx_info.mldsa_sig, G_context.tx_info.mldsa_sig_len);
+    offset += G_context.tx_info.mldsa_sig_len;
+
+    return io_send_response_pointer(resp, offset, SWO_SUCCESS);
+}

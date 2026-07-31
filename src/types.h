@@ -2,8 +2,10 @@
 
 #include <stddef.h>  // size_t
 #include <stdint.h>  // uint*_t
+#include <stdbool.h>
 
 #include "bip32.h"
+#include "lcx_mldsa.h"
 
 #include "constants.h"
 #include "tx_types.h"
@@ -17,6 +19,7 @@ typedef enum {
     GET_PUBLIC_KEY = 0x05,     /// public key of corresponding BIP32 path
     SIGN_TX = 0x06,            /// sign transaction with BIP32 path
     SIGN_TOKEN_TX = 0x07,      /// sign token transaction with BIP32 path and token address
+    SIGN_TX_MLDSA = 0x08,      /// sign transaction with an ML-DSA-44 key derived from BIP32 path
     PROVIDE_TOKEN_INFO = 0x22  /// provide dynamic token info via CAL TLV descriptor
 } command_e;
 /**
@@ -67,11 +70,19 @@ typedef struct {
     bool is_token_tx;         /// flag to indicate if this is a token transaction
     token_info_t token_info;  /// token information retrieved using the token address
 
+    // MLDSA sign selector
+    bool is_mldsa;  /// flag: use ML-DSA-44 signing instead of ECDSA
+
     // Signature related
     uint8_t m_hash[32];                  /// message hash digest
     uint8_t signature[MAX_DER_SIG_LEN];  /// transaction signature encoded in DER
     uint8_t signature_len;               /// length of transaction signature
     uint8_t v;                           /// parity of y-coordinate of R in ECDSA signature
+
+    // ML-DSA-44 outputs (only populated when is_mldsa is true)
+    uint8_t mldsa_pk[MLDSA44_PUBLICKEYBYTES];  /// ML-DSA-44 public key
+    uint8_t mldsa_sig[MLDSA44_SIGBYTES];       /// ML-DSA-44 signature
+    size_t mldsa_sig_len;                      /// actual signature length written
 } transaction_ctx_t;
 
 /**

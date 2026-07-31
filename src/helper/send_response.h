@@ -37,3 +37,18 @@ int helper_send_response_pubkey(void);
  *
  */
 int helper_send_response_sig(void);
+
+/**
+ * Helper to send APDU response with an ML-DSA-44 public key + signature.
+ *
+ * response = PK_LEN (2, big-endian) || pk (MLDSA44_PUBLICKEYBYTES) ||
+ *            SIG_LEN (2, big-endian) || sig (mldsa_sig_len)
+ *
+ * The public key is included so the host can verify the signature without
+ * a separate GET_PUBLIC_KEY exchange. 2-byte lengths are required because
+ * the ML-DSA sizes (>255 B) do not fit in the 1-byte prefix used by the
+ * ECDSA response.
+ *
+ * @return zero or positive integer if success, -1 otherwise.
+ */
+int helper_send_response_mldsa_sig(void);

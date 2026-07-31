@@ -36,6 +36,7 @@ class InsType(IntEnum):
     GET_PUBLIC_KEY = 0x05
     SIGN_TX = 0x06
     SIGN_TOKEN_TX = 0x07
+    SIGN_TX_MLDSA = 0x08
     PROVIDE_TOKEN_INFO = 0x22
 
 
@@ -123,6 +124,11 @@ class BoilerplateCommandSender:
     @contextmanager
     def sign_token_tx(self, path: str, transaction: bytes) -> Generator[None, None, None]:
         with self._sign_transaction(InsType.SIGN_TOKEN_TX, path, transaction) as response:
+            yield response
+
+    @contextmanager
+    def sign_tx_mldsa(self, path: str, transaction: bytes) -> Generator[None, None, None]:
+        with self._sign_transaction(InsType.SIGN_TX_MLDSA, path, transaction) as response:
             yield response
 
     # Retrieve the last asynchronous response from the backend
