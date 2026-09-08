@@ -525,7 +525,7 @@ def test_provide_dynamic_token_wrong_tuid_size(backend: BackendInterface) -> Non
     payload = format_tlv(0x01, 0x90)  # STRUCTURE_TYPE
     payload += format_tlv(0x02, 0x01)  # VERSION
     payload += format_tlv(0x03, 0x8001)  # COIN_TYPE
-    payload += format_tlv(0x04, "Boilerplate")  # APP
+    payload += format_tlv(0x04, "ECML-Signer")  # APP
     payload += format_tlv(0x05, "FAIL")  # TICKER
     payload += format_tlv(0x06, 6)  # MAGNITUDE
     payload += format_tlv(0x07, tuid_tlv)  # TUID with wrong size

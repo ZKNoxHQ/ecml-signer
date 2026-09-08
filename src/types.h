@@ -19,8 +19,18 @@ typedef enum {
     GET_PUBLIC_KEY = 0x05,     /// public key of corresponding BIP32 path
     SIGN_TX = 0x06,            /// sign transaction with BIP32 path
     SIGN_TOKEN_TX = 0x07,      /// sign token transaction with BIP32 path and token address
-    SIGN_TX_MLDSA = 0x08,      /// sign transaction with an ML-DSA-44 key derived from BIP32 path
-    PROVIDE_TOKEN_INFO = 0x22  /// provide dynamic token info via CAL TLV descriptor
+    SIGN_TX_MLDSA = 0x08,         /// sign transaction with an ML-DSA-44 key derived from BIP32 path
+    DUMMY = 0x0a,                 /// echo cdata (I/O smoke test)
+    SAMPLE_IN_BALL = 0x0b,        /// ML-DSA SampleInBall over host-provided c_tilde
+    KEYGEN_DILITHIUM_CORE = 0x0c, /// ML-DSA-44 keygen from a caller-supplied 32-byte seed
+    SIGN_DILITHIUM = 0x0f,        /// ML-DSA-44 sign the currently-loaded key (3-part APDU)
+    KEYGEN_DILITHIUM = 0x11,      /// ML-DSA-44 keygen from a BIP32 path (SLIP-0010 "mldsa-44")
+    GET_SIG_CHUNK = 0x12,         /// fetch a 255-byte-max slice of the stored ML-DSA-44 signature
+    GET_PK_CHUNK = 0x13,          /// fetch a 255-byte-max slice of the stored ML-DSA-44 public key
+    ECDSA_SIGN_HASH = 0x15,       /// blind-sign a 32-byte hash with secp256k1 for a BIP32 path
+    HYBRID_SIGN_HASH = 0x16,      /// sign a 32-byte hash with ECDSA (inline) AND ML-DSA-44 (chunk-fetched)
+    HYBRID_SIGN_USEROP = 0x17,    /// hybrid clear-sign an ERC-4337 v0.7 UserOperation
+    PROVIDE_TOKEN_INFO = 0x22     /// provide dynamic token info via CAL TLV descriptor
 } command_e;
 /**
  * Enumeration with parsing state.
@@ -35,9 +45,13 @@ typedef enum {
  * Enumeration with user request type.
  */
 typedef enum {
-    CONFIRM_ADDRESS,           /// confirm address derived from public key
-    CONFIRM_TRANSACTION,       /// confirm transaction information
-    CONFIRM_TOKEN_TRANSACTION  /// confirm token transaction information
+    CONFIRM_ADDRESS,            /// confirm address derived from public key
+    CONFIRM_TRANSACTION,        /// confirm transaction information
+    CONFIRM_TOKEN_TRANSACTION,  /// confirm token transaction information
+    CONFIRM_PQ_SIGN,            /// confirm ML-DSA raw payload signing (INS 0x0f)
+    CONFIRM_ECDSA_SIGN_HASH,    /// confirm blind-sign of a 32-byte hash (INS 0x15)
+    CONFIRM_HYBRID_SIGN_HASH,   /// confirm hybrid ECDSA+ML-DSA blind-sign of a 32-byte hash (INS 0x16)
+    CONFIRM_HYBRID_SIGN_USEROP  /// confirm hybrid clear-sign of an ERC-4337 v0.7 UserOp (INS 0x17)
 } request_type_e;
 
 /**
@@ -79,10 +93,12 @@ typedef struct {
     uint8_t signature_len;               /// length of transaction signature
     uint8_t v;                           /// parity of y-coordinate of R in ECDSA signature
 
-    // ML-DSA-44 outputs (only populated when is_mldsa is true)
+    // ML-DSA-44 outputs (populated by SIGN_TX_MLDSA or the KEYGEN_DILITHIUM* /
+    // SIGN_DILITHIUM primitive INS family)
     uint8_t mldsa_pk[MLDSA44_PUBLICKEYBYTES];  /// ML-DSA-44 public key
     uint8_t mldsa_sig[MLDSA44_SIGBYTES];       /// ML-DSA-44 signature
     size_t mldsa_sig_len;                      /// actual signature length written
+    uint8_t mldsa_seed[32];                    /// SLIP-0010 seed (kept for CORE keygen / SIGN)
 } transaction_ctx_t;
 
 /**

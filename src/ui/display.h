@@ -52,3 +52,39 @@ int ui_display_blind_signed_transaction(void);
  *
  */
 int ui_display_token_transaction(void);
+
+/**
+ * Display an opaque ML-DSA payload for approval (SIGN_DILITHIUM finalize).
+ *
+ * The payload is shown as a length + hex preview under a blind-signing warning
+ * since the device has no way to interpret its meaning.
+ *
+ * @return 0 if success, negative integer otherwise.
+ */
+int ui_display_pq_sign(void);
+
+/**
+ * Display a 32-byte hash for blind-sign approval (ECDSA_SIGN_HASH).
+ *
+ * @return 0 if success, negative integer otherwise.
+ */
+int ui_display_ecdsa_sign_hash(void);
+
+/**
+ * Display a 32-byte hash for hybrid (ECDSA + ML-DSA-44) blind-sign approval.
+ *
+ * @return 0 if success, negative integer otherwise.
+ */
+int ui_display_hybrid_sign_hash(void);
+
+/**
+ * Display an ERC-4337 UserOperation for hybrid (ECDSA + ML-DSA-44) approval.
+ *
+ * Shows Chain ID / Sender / To / Value (wei) when callData was verified and
+ * parsed as `execute(address,uint256,bytes)`; falls back to a blind
+ * "UserOp Hash" pair when no callData was provided or the selector didn't
+ * match.
+ *
+ * @return 0 if success, negative integer otherwise.
+ */
+int ui_display_hybrid_sign_userop(void);

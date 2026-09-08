@@ -25,7 +25,7 @@ include $(BOLOS_SDK)/Makefile.target
 #        Mandatory configuration       #
 ########################################
 # Application name
-APPNAME = "Boilerplate"
+APPNAME = "ECML-Signer"
 
 # Application version
 APPVERSION_M = 2
@@ -67,7 +67,7 @@ CURVE_APP_LOAD_PARAMS = secp256k1 ed25519
 # and SLIP-0044 standards.
 # If your app needs it, you can specify multiple path by using:
 # `PATH_APP_LOAD_PARAMS = "44'/1'" "45'/1'"`
-PATH_APP_LOAD_PARAMS = "44'/1'"   # purpose=coin(44) / coin_type=Testnet(1)
+PATH_APP_LOAD_PARAMS = "44'/60'" "44'/1'"   # Ethereum (60) + Testnet (1)
 
 # Setting to allow building variant applications
 # - <VARIANT_PARAM> is the name of the parameter which should be set
@@ -116,7 +116,7 @@ ENABLE_NBGL_QRCODE = 1
 ########################################
 # This is a smart documentation inclusion. The full documentation is available at https://ledgerhq.github.io/app-exchange/
 # --8<-- [start:variables]
-ifeq ($(APPNAME), "Boilerplate")
+ifeq ($(APPNAME), "ECML-Signer")
 # Two flags exist for enabling the SWAP
 #   - ENABLE_SWAP           will lead to the enabling of the swap related C code of the standard_app
 #                           AND will lead to the enabling of the APP_LOAD_PARAM required for os_lib_call working on device

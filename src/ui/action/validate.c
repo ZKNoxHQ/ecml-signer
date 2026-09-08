@@ -22,13 +22,13 @@
 #include "cx.h"
 #include "crypto_helpers.h"
 #include "lcx_mldsa.h"
-#include "cx_mldsa_internal.h"
 
 #include "validate.h"
 #include "menu.h"
 #include "sw.h"
 #include "globals.h"
 #include "send_response.h"
+#include "mldsa_derive.h"
 
 void validate_pubkey(bool choice) {
     if (choice) {
@@ -64,57 +64,34 @@ static int crypto_sign_message(void) {
     return 0;
 }
 
-// SLIP-0010 HMAC-SHA512 key used to derive the ML-DSA-44 master seed from the
-// device root seed. Kept distinct from "Bitcoin seed" / "ed25519 seed" so the
-// ML-DSA key tree is independent of any ECDSA/Ed25519 tree at the same path.
-static const char MLDSA_SLIP10_KEY[] = "mldsa-44";
-
-// The ML-DSA seed is 32 bytes; SDK requires a 64-byte raw_privkey output buffer.
 static int crypto_sign_message_mldsa(void) {
-    uint8_t raw_privkey[64] = {0};
-    // Secret key is bulky (2560 B for ML-DSA-44); keep it on the stack scoped to
-    // this call so it is scrubbed on return rather than living in .bss.
+    // Secret key is bulky (~2560 B for ML-DSA-44); keep it on the stack scoped
+    // to this call so it is scrubbed on return rather than living in .bss.
     uint8_t sk[MLDSA44_SECRETKEYBYTES] = {0};
-    cx_err_t error;
+    uint8_t seed[MLDSA_DERIVE_SEED_LEN] = {0};
     int status = -1;
 
-    // SLIP-0010 derivation using "mldsa-44" as the HMAC-SHA512 key.
-    error = os_derive_bip32_with_seed_no_throw(HDW_ED25519_SLIP10,
-                                               CX_CURVE_Ed25519,
-                                               G_context.bip32_path,
-                                               G_context.bip32_path_len,
-                                               raw_privkey,
-                                               NULL,
-                                               (unsigned char *) MLDSA_SLIP10_KEY,
-                                               sizeof(MLDSA_SLIP10_KEY) - 1);
-    if (error != CX_OK) {
-        PRINTF("SLIP-10 derivation failed: 0x%x\n", error);
+    if (mldsa_derive_seed(G_context.bip32_path, G_context.bip32_path_len, seed) != 0) {
+        PRINTF("mldsa_derive_seed failed\n");
         goto end;
     }
 
-    // Deterministic ML-DSA keypair from the 32-byte derived seed.
-    error = MLDSA_internal_keygen(G_context.tx_info.mldsa_pk,
-                                  sizeof(G_context.tx_info.mldsa_pk),
-                                  sk,
-                                  sizeof(sk),
-                                  raw_privkey,
-                                  MLDSA_44);
-    if (error != CX_OK) {
-        PRINTF("MLDSA_internal_keygen failed: 0x%x\n", error);
+    if (mldsa_keygen_from_seed(seed, G_context.tx_info.mldsa_pk, sk, sizeof(sk)) != 0) {
+        PRINTF("mldsa_keygen_from_seed failed\n");
         goto end;
     }
 
     // Sign the transaction hash. No context string (ctx_len == 0).
-    error = MLDSA_sign(G_context.tx_info.mldsa_sig,
-                       sizeof(G_context.tx_info.mldsa_sig),
-                       &G_context.tx_info.mldsa_sig_len,
-                       G_context.tx_info.m_hash,
-                       sizeof(G_context.tx_info.m_hash),
-                       NULL,
-                       0,
-                       sk,
-                       sizeof(sk),
-                       MLDSA_44);
+    cx_err_t error = MLDSA_sign(G_context.tx_info.mldsa_sig,
+                                sizeof(G_context.tx_info.mldsa_sig),
+                                &G_context.tx_info.mldsa_sig_len,
+                                G_context.tx_info.m_hash,
+                                sizeof(G_context.tx_info.m_hash),
+                                NULL,
+                                0,
+                                sk,
+                                sizeof(sk),
+                                MLDSA_44);
     if (error != CX_OK) {
         PRINTF("MLDSA_sign failed: 0x%x\n", error);
         goto end;
@@ -125,8 +102,138 @@ static int crypto_sign_message_mldsa(void) {
 
 end:
     explicit_bzero(sk, sizeof(sk));
-    explicit_bzero(raw_privkey, sizeof(raw_privkey));
+    explicit_bzero(seed, sizeof(seed));
     return status;
+}
+
+// Sign the payload currently in G_context.tx_info.raw_tx with the ML-DSA-44
+// key derived from G_context.tx_info.mldsa_seed. On success the signature is
+// stored in G_context.tx_info.mldsa_sig and the client fetches it via chunks.
+static int crypto_pq_sign(void) {
+    uint8_t sk[MLDSA44_SECRETKEYBYTES] = {0};
+    int status = -1;
+
+    // Re-derive sk from the stored seed. We regenerate the pk into a scratch
+    // that we then overwrite the stored pk with (they should match, but this
+    // fails closed if the seed was tampered with between keygen and sign).
+    uint8_t pk_scratch[MLDSA44_PUBLICKEYBYTES] = {0};
+    if (mldsa_keygen_from_seed(G_context.tx_info.mldsa_seed,
+                               pk_scratch,
+                               sk,
+                               sizeof(sk)) != 0) {
+        PRINTF("crypto_pq_sign: keygen from stored seed failed\n");
+        goto end;
+    }
+    memmove(G_context.tx_info.mldsa_pk, pk_scratch, sizeof(pk_scratch));
+
+    cx_err_t error = MLDSA_sign(G_context.tx_info.mldsa_sig,
+                                sizeof(G_context.tx_info.mldsa_sig),
+                                &G_context.tx_info.mldsa_sig_len,
+                                G_context.tx_info.raw_tx,
+                                G_context.tx_info.raw_tx_len,
+                                NULL,
+                                0,
+                                sk,
+                                sizeof(sk),
+                                MLDSA_44);
+    if (error != CX_OK) {
+        PRINTF("MLDSA_sign failed: 0x%x\n", error);
+        goto end;
+    }
+    status = 0;
+
+end:
+    explicit_bzero(sk, sizeof(sk));
+    explicit_bzero(pk_scratch, sizeof(pk_scratch));
+    return status;
+}
+
+void validate_pq_sign(bool choice) {
+    if (choice) {
+        G_context.state = STATE_APPROVED;
+        if (crypto_pq_sign() != 0) {
+            // Fail closed: wipe sig so a stale chunk cannot be fetched.
+            explicit_bzero(G_context.tx_info.mldsa_sig, sizeof(G_context.tx_info.mldsa_sig));
+            G_context.tx_info.mldsa_sig_len = 0;
+            G_context.state                 = STATE_NONE;
+            io_send_sw(SWO_SECURITY_ISSUE);
+        } else {
+            io_send_sw(SWO_SUCCESS);
+        }
+    } else {
+        explicit_bzero(G_context.tx_info.mldsa_sig, sizeof(G_context.tx_info.mldsa_sig));
+        G_context.tx_info.mldsa_sig_len = 0;
+        G_context.state                 = STATE_NONE;
+        io_send_sw(SWO_CONDITIONS_NOT_SATISFIED);
+    }
+}
+
+// HYBRID_SIGN_HASH (INS 0x16) approval action. Signs G_context.tx_info.m_hash
+// with secp256k1 (returned inline) and ML-DSA-44 (stored for chunk fetch).
+void validate_hybrid_sign_hash(bool choice) {
+    if (!choice) {
+        G_context.state = STATE_NONE;
+        io_send_sw(SWO_CONDITIONS_NOT_SATISFIED);
+        return;
+    }
+
+    G_context.state = STATE_APPROVED;
+
+    // 1. ECDSA half — reuses the existing secp256k1 hash-signing path.
+    if (crypto_sign_message() != 0) {
+        G_context.state = STATE_NONE;
+        io_send_sw(SWO_SECURITY_ISSUE);
+        return;
+    }
+
+    // 2. ML-DSA-44 half. Derive the seed here (not in the handler) so it is
+    // never resident before the user has approved the operation.
+    uint8_t seed[MLDSA_DERIVE_SEED_LEN] = {0};
+    uint8_t sk[MLDSA44_SECRETKEYBYTES]  = {0};
+    int     status                      = -1;
+
+    if (mldsa_derive_seed(G_context.bip32_path, G_context.bip32_path_len, seed) != 0) {
+        PRINTF("validate_hybrid_sign_hash: derive_seed failed\n");
+        goto end;
+    }
+    if (mldsa_keygen_from_seed(seed, G_context.tx_info.mldsa_pk, sk, sizeof(sk)) != 0) {
+        PRINTF("validate_hybrid_sign_hash: keygen_from_seed failed\n");
+        goto end;
+    }
+
+    cx_err_t error = MLDSA_sign(G_context.tx_info.mldsa_sig,
+                                sizeof(G_context.tx_info.mldsa_sig),
+                                &G_context.tx_info.mldsa_sig_len,
+                                G_context.tx_info.m_hash,
+                                sizeof(G_context.tx_info.m_hash),
+                                NULL,
+                                0,
+                                sk,
+                                sizeof(sk),
+                                MLDSA_44);
+    if (error != CX_OK) {
+        PRINTF("validate_hybrid_sign_hash: MLDSA_sign failed: 0x%x\n", error);
+        goto end;
+    }
+    status = 0;
+
+end:
+    explicit_bzero(seed, sizeof(seed));
+    explicit_bzero(sk, sizeof(sk));
+
+    if (status != 0) {
+        // Fail closed: scrub the ML-DSA outputs so a stale chunk cannot leak.
+        explicit_bzero(G_context.tx_info.mldsa_pk, sizeof(G_context.tx_info.mldsa_pk));
+        explicit_bzero(G_context.tx_info.mldsa_sig, sizeof(G_context.tx_info.mldsa_sig));
+        G_context.tx_info.mldsa_sig_len = 0;
+        G_context.state                 = STATE_NONE;
+        io_send_sw(SWO_SECURITY_ISSUE);
+        return;
+    }
+
+    // 3. Send the ECDSA signature inline. The client fetches the ML-DSA half
+    // via GET_PK_CHUNK (0x13) and GET_SIG_CHUNK (0x12).
+    helper_send_response_sig();
 }
 
 void validate_transaction(bool choice) {

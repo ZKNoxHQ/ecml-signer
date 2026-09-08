@@ -37,6 +37,16 @@ class InsType(IntEnum):
     SIGN_TX = 0x06
     SIGN_TOKEN_TX = 0x07
     SIGN_TX_MLDSA = 0x08
+    DUMMY = 0x0A
+    SAMPLE_IN_BALL = 0x0B
+    KEYGEN_DILITHIUM_CORE = 0x0C
+    SIGN_DILITHIUM = 0x0F
+    KEYGEN_DILITHIUM = 0x11
+    GET_SIG_CHUNK = 0x12
+    GET_PK_CHUNK = 0x13
+    ECDSA_SIGN_HASH = 0x15
+    HYBRID_SIGN_HASH = 0x16
+    HYBRID_SIGN_USEROP = 0x17
     PROVIDE_TOKEN_INFO = 0x22
 
 
@@ -175,7 +185,7 @@ class BoilerplateCommandSender:
         payload = format_tlv(0x01, 0x90)  # STRUCTURE_TYPE: DYNAMIC_TOKEN
         payload += format_tlv(0x02, 0x01)  # VERSION: 1
         payload += format_tlv(0x03, chain_id)  # COIN_TYPE
-        payload += format_tlv(0x04, "Boilerplate")  # APP: application name
+        payload += format_tlv(0x04, "ECML-Signer")  # APP: application name
         payload += format_tlv(0x05, ticker)  # TICKER
         payload += format_tlv(0x06, decimals)  # MAGNITUDE (decimals)
         payload += format_tlv(0x07, tuid)  # TUID

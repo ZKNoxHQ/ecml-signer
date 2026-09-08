@@ -27,7 +27,8 @@ def verify_name(name: str) -> None:
 
     name_str = ""
     lines = _read_makefile()
-    name_re = re.compile(r"^APPNAME\s?=\s?\"?(?P<val>\w+)\"?", re.I)
+    # Accept hyphens in APPNAME (e.g., "ECML-Signer") in addition to word chars.
+    name_re = re.compile(r"^APPNAME\s?=\s?\"?(?P<val>[\w-]+)\"?", re.I)
     for line in lines:
         info = name_re.match(line)
         if info:
