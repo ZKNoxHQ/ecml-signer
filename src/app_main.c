@@ -29,6 +29,7 @@
 #include "menu.h"
 #include "dispatcher.h"
 #include "dynamic_token_info.h"
+#include "stack_watermark.h"
 
 global_ctx_t G_context;
 
@@ -44,6 +45,9 @@ void app_main() {
     command_t cmd;
 
     io_init();
+
+    // DEBUG_STACK_WATERMARK=1 builds only: paint the free stack (see src/debug).
+    stack_watermark_init();
 
 #ifdef HAVE_SWAP
     // When called in swap context as a library, we don't want to show the menu
@@ -96,5 +100,8 @@ void app_main() {
             PRINTF("=> apdu_dispatcher failure\n");
             return;
         }
+
+        // DEBUG_STACK_WATERMARK=1 builds only: peak stack depth so far.
+        stack_watermark_report();
     }
 }

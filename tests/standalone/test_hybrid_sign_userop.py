@@ -129,12 +129,16 @@ def test_p1_out_of_range_rejected(backend: BackendInterface) -> None:
         assert e.value.status == Errors.SWO_INCORRECT_P1_P2
 
 
-def test_p2_nonzero_rejected(backend: BackendInterface) -> None:
-    with pytest.raises(ExceptionRAPDU) as e:
-        backend.exchange(
-            cla=CLA, ins=InsType.HYBRID_SIGN_USEROP, p1=P1_PATH, p2=1, data=PATH
-        )
-    assert e.value.status == Errors.SWO_INCORRECT_P1_P2
+def test_p2_out_of_range_rejected(backend: BackendInterface) -> None:
+    # P2 carries the ML-DSA parameter set: 0x00 (ML-DSA-44) and 0x01
+    # (ML-DSA-65) are valid, anything else is rejected. The 0x01 path is
+    # exercised in test_mldsa65.py.
+    for bad_p2 in (0x02, 0x80, 0xFF):
+        with pytest.raises(ExceptionRAPDU) as e:
+            backend.exchange(
+                cla=CLA, ins=InsType.HYBRID_SIGN_USEROP, p1=P1_PATH, p2=bad_p2, data=PATH
+            )
+        assert e.value.status == Errors.SWO_INCORRECT_P1_P2
 
 
 # ---- Length enforcement ------------------------------------------------

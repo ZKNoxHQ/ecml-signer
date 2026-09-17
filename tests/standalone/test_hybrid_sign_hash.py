@@ -21,9 +21,12 @@ def _payload(path: str, hash_bytes: bytes) -> bytes:
     return pack_derivation_path(path) + hash_bytes
 
 
-def test_p1p2_must_be_zero(backend: BackendInterface) -> None:
+def test_p1_must_be_zero_and_p2_is_the_parameter_set(backend: BackendInterface) -> None:
+    # P1 must be 0. P2 selects the ML-DSA parameter set: 0x00 (ML-DSA-44) and
+    # 0x01 (ML-DSA-65) are valid and start a review, anything else is rejected
+    # (the valid values are exercised end to end in test_mldsa65.py).
     payload = _payload("m/44'/1'/0'/0'/0'", bytes(32))
-    for p1, p2 in [(1, 0), (0, 1), (0xFF, 0), (0, 0xFF)]:
+    for p1, p2 in [(1, 0), (0xFF, 0), (1, 1), (0, 2), (0, 0x80), (0, 0xFF)]:
         with pytest.raises(ExceptionRAPDU) as e:
             backend.exchange(
                 cla=CLA, ins=InsType.HYBRID_SIGN_HASH, p1=p1, p2=p2, data=payload

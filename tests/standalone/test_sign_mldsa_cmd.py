@@ -1,3 +1,4 @@
+import pytest
 from Crypto.Hash import keccak
 from cryptography.hazmat.primitives.asymmetric import mldsa
 from ragger.backend.interface import BackendInterface
@@ -12,7 +13,18 @@ from application_client.boilerplate_transaction import Transaction
 # device seed via SLIP-0010 (HMAC-SHA512 key = "mldsa-44"). We can't reproduce
 # that key host-side without the device seed, so the test relies on the pk
 # returned alongside the signature and just verifies signature validity.
+def _skip_without_io_buffer(backend: BackendInterface) -> None:
+    """SIGN_TX_MLDSA answers pk + signature in ONE APDU. Nano X has no I/O
+    buffer for that (28 KB of SRAM against the ~14.2 KB stack peak of the
+    signing path, see tests/standalone/test_stack_watermark.py), so the INS
+    reports SWO_INVALID_INS there and clients use the chunk-fetched flows;
+    test_mldsa65.py covers both behaviours."""
+    if str(getattr(backend.device, "name", backend.device)).lower().startswith("nanox"):
+        pytest.skip("SIGN_TX_MLDSA is unavailable on Nano X")
+
+
 def test_sign_tx_mldsa(backend: BackendInterface, scenario_navigator: NavigateWithScenario) -> None:
+    _skip_without_io_buffer(backend)
     client = BoilerplateCommandSender(backend)
     # SLIP-0010 ed25519-mode derivation requires all-hardened path components.
     path: str = "m/44'/1'/0'/0'/0'"
@@ -48,6 +60,7 @@ def test_sign_tx_mldsa(backend: BackendInterface, scenario_navigator: NavigateWi
 def test_sign_tx_mldsa_deterministic_pk(
     backend: BackendInterface, scenario_navigator: NavigateWithScenario
 ) -> None:
+    _skip_without_io_buffer(backend)
     client = BoilerplateCommandSender(backend)
     # SLIP-0010 ed25519-mode derivation requires all-hardened path components.
     path: str = "m/44'/1'/0'/0'/0'"

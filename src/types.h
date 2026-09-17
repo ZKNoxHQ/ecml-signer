@@ -9,6 +9,7 @@
 
 #include "constants.h"
 #include "tx_types.h"
+#include "mldsa_derive.h"
 
 /**
  * Enumeration with expected INS of APDU commands.
@@ -19,16 +20,18 @@ typedef enum {
     GET_PUBLIC_KEY = 0x05,     /// public key of corresponding BIP32 path
     SIGN_TX = 0x06,            /// sign transaction with BIP32 path
     SIGN_TOKEN_TX = 0x07,      /// sign token transaction with BIP32 path and token address
-    SIGN_TX_MLDSA = 0x08,         /// sign transaction with an ML-DSA-44 key derived from BIP32 path
+    // The ML-DSA INS take the parameter set in P2 (0x00 = ML-DSA-44, 0x01 =
+    // ML-DSA-65; low bits of P2 for SIGN_TX_MLDSA), see mldsa_derive.h.
+    SIGN_TX_MLDSA = 0x08,         /// sign transaction with an ML-DSA key derived from BIP32 path
     DUMMY = 0x0a,                 /// echo cdata (I/O smoke test)
     SAMPLE_IN_BALL = 0x0b,        /// ML-DSA SampleInBall over host-provided c_tilde
-    KEYGEN_DILITHIUM_CORE = 0x0c, /// ML-DSA-44 keygen from a caller-supplied 32-byte seed
-    SIGN_DILITHIUM = 0x0f,        /// ML-DSA-44 sign the currently-loaded key (3-part APDU)
-    KEYGEN_DILITHIUM = 0x11,      /// ML-DSA-44 keygen from a BIP32 path (SLIP-0010 "mldsa-44")
-    GET_SIG_CHUNK = 0x12,         /// fetch a 255-byte-max slice of the stored ML-DSA-44 signature
-    GET_PK_CHUNK = 0x13,          /// fetch a 255-byte-max slice of the stored ML-DSA-44 public key
+    KEYGEN_DILITHIUM_CORE = 0x0c, /// ML-DSA keygen from a caller-supplied 32-byte seed
+    SIGN_DILITHIUM = 0x0f,        /// ML-DSA sign with the currently-loaded key (3-part APDU)
+    KEYGEN_DILITHIUM = 0x11,      /// ML-DSA keygen from a BIP32 path (SLIP-0010 "ML-DSA-xx seed")
+    GET_SIG_CHUNK = 0x12,         /// fetch a 255-byte-max slice of the stored ML-DSA signature
+    GET_PK_CHUNK = 0x13,          /// fetch a 255-byte-max slice of the stored ML-DSA public key
     ECDSA_SIGN_HASH = 0x15,       /// blind-sign a 32-byte hash with secp256k1 for a BIP32 path
-    HYBRID_SIGN_HASH = 0x16,      /// sign a 32-byte hash with ECDSA (inline) AND ML-DSA-44 (chunk-fetched)
+    HYBRID_SIGN_HASH = 0x16,      /// sign a 32-byte hash with ECDSA (inline) AND ML-DSA (chunk-fetched)
     HYBRID_SIGN_USEROP = 0x17,    /// hybrid clear-sign an ERC-4337 v0.7 UserOperation
     PROVIDE_TOKEN_INFO = 0x22     /// provide dynamic token info via CAL TLV descriptor
 } command_e;
@@ -85,7 +88,7 @@ typedef struct {
     token_info_t token_info;  /// token information retrieved using the token address
 
     // MLDSA sign selector
-    bool is_mldsa;  /// flag: use ML-DSA-44 signing instead of ECDSA
+    bool is_mldsa;  /// flag: use ML-DSA signing instead of ECDSA
 
     // Signature related
     uint8_t m_hash[32];                  /// message hash digest
@@ -93,12 +96,15 @@ typedef struct {
     uint8_t signature_len;               /// length of transaction signature
     uint8_t v;                           /// parity of y-coordinate of R in ECDSA signature
 
-    // ML-DSA-44 outputs (populated by SIGN_TX_MLDSA or the KEYGEN_DILITHIUM* /
-    // SIGN_DILITHIUM primitive INS family)
-    uint8_t mldsa_pk[MLDSA44_PUBLICKEYBYTES];  /// ML-DSA-44 public key
-    uint8_t mldsa_sig[MLDSA44_SIGBYTES];       /// ML-DSA-44 signature
-    size_t mldsa_sig_len;                      /// actual signature length written
-    uint8_t mldsa_seed[32];                    /// SLIP-0010 seed (kept for CORE keygen / SIGN)
+    // ML-DSA outputs (populated by SIGN_TX_MLDSA, HYBRID_SIGN_* or the
+    // KEYGEN_DILITHIUM* / SIGN_DILITHIUM primitive INS family). The buffers are
+    // sized for the largest supported set (ML-DSA-65); mldsa_param selects the
+    // sizes actually in use (mldsa_pk_bytes / mldsa_sig_bytes).
+    MLDSA_param_t mldsa_param;                       /// parameter set of the loaded key / current flow
+    uint8_t mldsa_pk[MLDSA_APP_MAX_PUBLICKEYBYTES];  /// ML-DSA public key (1312 or 1952 bytes used)
+    uint8_t mldsa_sig[MLDSA_APP_MAX_SIGBYTES];       /// ML-DSA signature (2420 or 3309 bytes used)
+    size_t mldsa_sig_len;                            /// actual signature length written
+    uint8_t mldsa_seed[32];                          /// SLIP-0010 seed (kept for CORE keygen / SIGN)
 } transaction_ctx_t;
 
 /**

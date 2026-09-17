@@ -1,0 +1,19 @@
+{
+  "name": "app-mldsa-js",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Node CLI: keygen / sign / hybrid-sign on a Ledger running ECML-Signer (ML-DSA-44 and ML-DSA-65), verify off-chain via @noble/post-quantum",
+  "scripts": {
+    "keygen": "node keygen.js",
+    "sign": "node sign.js",
+    "hybrid": "node hybrid.js",
+    "userop": "node userop.js",
+    "verify": "node verify.js"
+  },
+  "dependencies": {
+    "@ledgerhq/hw-transport-node-hid": "^6.29.13",
+    "@noble/hashes": "^1.5.0",
+    "@noble/post-quantum": "^0.2.1"
+  }
+}

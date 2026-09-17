@@ -20,6 +20,53 @@ The application interface can be accessed over HID or BLE
 
 ## APDUs
 
+### ML-DSA PARAMETER SET (P2)
+
+Every ML-DSA instruction takes the parameter set in **P2**:
+
+| P2 | Parameter set | pk | signature | c~ | tau | omega |
+|----|---------------|----|-----------|----|-----|-------|
+| `0x00` | ML-DSA-44 (FIPS 204, category 2) | 1312 B | 2420 B | 32 B | 39 | 80 |
+| `0x01` | ML-DSA-65 (FIPS 204, category 3) | 1952 B | 3309 B | 48 B | 49 | 55 |
+
+Any other value returns `SWO_INCORRECT_P1_P2`. `0x00` is the value every
+client sent before ML-DSA-65 existed, so the protocol is unchanged for them.
+
+Instructions carrying the selector: `KEYGEN_DILITHIUM_CORE` (0x0C),
+`KEYGEN_DILITHIUM` (0x11), `SAMPLE_IN_BALL` (0x0B), `HYBRID_SIGN_HASH` (0x16),
+`HYBRID_SIGN_USEROP` (0x17, on *every* APDU of the sequence — the set is fixed
+by the `P1 = 0x00` one and a later APDU disagreeing is `SWO_INCORRECT_P1_P2`),
+and `SIGN_TX_MLDSA` (0x08, in the low bits of P2 beside the `0x80` more-flag:
+`0x80`/`0x00` for ML-DSA-44 as before, `0x81`/`0x01` for ML-DSA-65).
+
+`GET_PK_CHUNK` (0x13) and `GET_SIG_CHUNK` (0x12) do **not** take a selector:
+they follow the parameter set of the key currently loaded, and refuse any
+`(P1, P2)` slice reaching past its real size with `SWO_WRONG_DATA_LENGTH`
+(1312 / 2420 bytes for ML-DSA-44, 1952 / 3309 for ML-DSA-65). The chunk
+sequences are therefore:
+
+| | ML-DSA-44 | ML-DSA-65 |
+|---|---|---|
+| public key | 5x255 + 37 | 7x255 + 167 |
+| signature  | 9x255 + 125 | 12x255 + 249 |
+
+**Key separation.** The seed of each set is derived over SLIP-0010 with its own
+personalization — `"ML-DSA-44 seed"` (unchanged, so keys stay interoperable
+with tooling built against ZKNOX-HW-MLDSA) and `"ML-DSA-65 seed"` — so the two
+keys of one BIP32 path are independent: a compromise of one says nothing about
+the other, and `rho` differs.
+
+**Device limitation.** `SIGN_TX_MLDSA` answers the public key *and* the
+signature in a single APDU (up to 5265 bytes for ML-DSA-65), which needs an
+enlarged I/O buffer. On **Nano X** that buffer cannot coexist with the ~14.2 KB
+of stack the review-and-signing path needs in 28 KB of SRAM, so the instruction
+returns `SWO_INVALID_INS` there. Every ML-DSA feature — both parameter sets —
+remains available on Nano X through `HYBRID_SIGN_HASH`, `HYBRID_SIGN_USEROP`
+and the `KEYGEN_DILITHIUM` + `SIGN_DILITHIUM` primitives, which return the
+ML-DSA material in 255-byte chunks. See `tests/standalone/test_stack_watermark.py`
+for the measurement.
+
+
 ### GET BOILERPLATE PUBLIC ADDRESS
 
 #### Description
@@ -374,7 +421,7 @@ None (returns 0x9000 on success)
 | SW   | Description                                           |
 | ---  | ---                                                   |
 | B009 | SW_INVALID_DYNAMIC_TOKEN - TLV parsing failed, signature verification failed, wrong coin type, or TUID validation failed |
-| 6A86 | SWO_INCORRECT_P1_P2 - P1 or P2 not zero               |
+| 6A86 | SWO_INCORRECT_P1_P2 - P1 wrong, or P2 not a valid ML-DSA parameter set |
 | 6A87 | SWO_WRONG_DATA_LENGTH - Invalid TLV structure length  |
 
 **Note on testing:** Speculos emulator accepts test PKI certificates for signature validation,

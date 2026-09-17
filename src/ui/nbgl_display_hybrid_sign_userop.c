@@ -16,6 +16,7 @@
 #include "validate.h"
 #include "menu.h"
 #include "hybrid_sign_userop.h"
+#include "mldsa_derive.h"
 
 // Pair buffers. Static so NBGL can hold pointers across the review flow.
 // Sizes match what the ZKNOX reference used: 21 chars for uint64 decimals,
@@ -25,10 +26,12 @@ static char g_userop_sender[43];
 static char g_userop_to[43];
 static char g_userop_value[67];  // large enough for decimal wei or hex fallback
 static char g_userop_hash[67];
+// "ECDSA + ML-DSA-44" / "ECDSA + ML-DSA-65"
+static char g_userop_scheme[8 + 9 + 1];
 
-// Up to 5 pairs: chain / sender / to / value / hash-fallback. Only one of
-// (to+value) vs (hash) is populated at a time, so max 4 in practice.
-static nbgl_contentTagValue_t     userop_pairs[5];
+// Up to 6 pairs: signer / chain / sender / to / value / hash-fallback. Only
+// one of (to+value) vs (hash) is populated at a time, so max 5 in practice.
+static nbgl_contentTagValue_t     userop_pairs[6];
 static nbgl_contentTagValueList_t userop_pairList;
 
 // Big-endian uint256 → decimal string, if it fits in uint64_t. Returns false
@@ -91,6 +94,16 @@ int ui_display_hybrid_sign_userop(void) {
     explicit_bzero(g_userop_hash, sizeof(g_userop_hash));
 
     int pair_index = 0;
+
+    // The ML-DSA parameter set is chosen by the host (P2): show it so the
+    // user knows which of the two independent ML-DSA keys is used.
+    snprintf(g_userop_scheme,
+             sizeof(g_userop_scheme),
+             "ECDSA + %s",
+             mldsa_param_name(G_context.tx_info.mldsa_param));
+    userop_pairs[pair_index].item  = "Signer";
+    userop_pairs[pair_index].value = g_userop_scheme;
+    pair_index++;
 
     if (uint256_be_to_dec(userop_get_chain_id(), g_userop_chain, sizeof(g_userop_chain))) {
         userop_pairs[pair_index].item  = "Chain ID";

@@ -6,6 +6,7 @@
 #include "io.h"
 
 #include "hybrid_sign_hash.h"
+#include "mldsa_derive.h"
 #include "constants.h"
 #include "display.h"
 #include "globals.h"
@@ -13,8 +14,9 @@
 
 #define M_HASH_LEN 32
 
-int handler_hybrid_sign_hash(buffer_t *cdata) {
+int handler_hybrid_sign_hash(buffer_t *cdata, MLDSA_param_t param) {
     explicit_bzero(&G_context, sizeof(G_context));
+    G_context.tx_info.mldsa_param = param;
 
     if (!buffer_read_u8(cdata, &G_context.bip32_path_len) ||
         !buffer_read_bip32_path(cdata, G_context.bip32_path, (size_t) G_context.bip32_path_len)) {

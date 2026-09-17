@@ -76,11 +76,15 @@ static int check_and_sign_swap_tx(transaction_ctx_t *tx_ctx) {
  * @param[in] req_type Request type (CONFIRM_TRANSACTION or CONFIRM_TOKEN_TRANSACTION)
  * @return SWO_SUCCESS on success, error code otherwise
  */
-static int init_transaction_context(buffer_t *cdata, uint8_t req_type, bool is_mldsa) {
+static int init_transaction_context(buffer_t *cdata,
+                                    uint8_t   req_type,
+                                    bool      is_mldsa,
+                                    MLDSA_param_t param) {
     explicit_bzero(&G_context, sizeof(G_context));
     G_context.req_type = req_type;
     G_context.state = STATE_NONE;
     G_context.tx_info.is_mldsa = is_mldsa;
+    G_context.tx_info.mldsa_param = param;
 
     if (!buffer_read_u8(cdata, &G_context.bip32_path_len) ||
         !buffer_read_bip32_path(cdata, G_context.bip32_path, (size_t) G_context.bip32_path_len)) {
@@ -150,12 +154,22 @@ static uint16_t process_transaction(bool is_token_tx) {
     return SWO_SUCCESS;
 }
 
-int handler_sign_tx(buffer_t *cdata, uint8_t chunk, bool more, bool is_token_tx, bool is_mldsa) {
+int handler_sign_tx(buffer_t *cdata,
+                    uint8_t   chunk,
+                    bool      more,
+                    bool      is_token_tx,
+                    bool      is_mldsa,
+                    MLDSA_param_t param) {
     uint8_t req_type = is_token_tx ? CONFIRM_TOKEN_TRANSACTION : CONFIRM_TRANSACTION;
     if (chunk == 0) {
         // first APDU, parse BIP32 path and return
-        return init_transaction_context(cdata, req_type, is_mldsa);
+        return init_transaction_context(cdata, req_type, is_mldsa, param);
     } else {
+        // the parameter set is fixed by the first chunk: a later chunk carrying
+        // another value is a client bug, fail closed
+        if (is_mldsa && param != G_context.tx_info.mldsa_param) {
+            return io_send_sw(SWO_INCORRECT_P1_P2);
+        }
         // parse transaction
         uint16_t err = accumulate_transaction_data(cdata, req_type);
         if (err != SWO_SUCCESS) {

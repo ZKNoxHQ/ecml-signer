@@ -9,6 +9,7 @@
 #include "lcx_sha3.h"
 
 #include "hybrid_sign_userop.h"
+#include "mldsa_derive.h"
 #include "constants.h"
 #include "display.h"
 #include "globals.h"
@@ -46,7 +47,8 @@ typedef struct {
     uint8_t call_value[32];
     bool    has_call_info;
 
-    uint8_t step;  // tracks which P1 we expect next
+    MLDSA_param_t param;  // ML-DSA parameter set fixed by the P1 = 0x00 APDU
+    uint8_t       step;   // tracks which P1 we expect next
 } userop_ctx_t;
 
 static userop_ctx_t userop_ctx;
@@ -156,10 +158,17 @@ static int process_calldata(const uint8_t *data, uint16_t len) {
 // Public handler
 // ---------------------------------------------------------------------------
 
-int handler_hybrid_sign_userop(buffer_t *cdata, uint8_t p1) {
+int handler_hybrid_sign_userop(buffer_t *cdata, uint8_t p1, MLDSA_param_t param) {
+    // The parameter set is chosen by the first APDU; every following APDU of
+    // the sequence must repeat it (a mismatch is a client bug, fail closed).
+    if (p1 != P1_USEROP_PATH && param != userop_ctx.param) {
+        return io_send_sw(SWO_INCORRECT_P1_P2);
+    }
+
     switch (p1) {
         case P1_USEROP_PATH: {
             explicit_bzero(&userop_ctx, sizeof(userop_ctx));
+            userop_ctx.param = param;
 
             if (!buffer_read_u8(cdata, &G_context.bip32_path_len) ||
                 !buffer_read_bip32_path(cdata,
@@ -242,9 +251,10 @@ int handler_hybrid_sign_userop(buffer_t *cdata, uint8_t p1) {
                 return io_send_sw(SWO_INCORRECT_DATA);
             }
 
-            G_context.req_type = CONFIRM_HYBRID_SIGN_USEROP;
-            G_context.state    = STATE_PARSED;
-            userop_ctx.step    = 0xFF;
+            G_context.tx_info.mldsa_param = userop_ctx.param;
+            G_context.req_type            = CONFIRM_HYBRID_SIGN_USEROP;
+            G_context.state               = STATE_PARSED;
+            userop_ctx.step               = 0xFF;
 
             return ui_display_hybrid_sign_userop();
         }

@@ -4,6 +4,7 @@
 #include <stdbool.h>
 
 #include "buffer.h"
+#include "lcx_mldsa.h"
 
 /**
  * HYBRID_SIGN_USEROP (INS 0x17) — ERC-4337 v0.7 UserOperation hybrid clear-signing.
@@ -11,7 +12,10 @@
  * Ported from ZKNOX-HW-MLDSA; this INS is the one ZKNOX got right (proper
  * step-guarded state machine, hash-verified callData, clear-signing review).
  *
- * Multi-APDU protocol:
+ * Multi-APDU protocol (P2 = ML-DSA parameter set on EVERY APDU of the
+ * sequence: 0x00 = ML-DSA-44, 0x01 = ML-DSA-65; the set is fixed by the
+ * P1 = 0x00 APDU and a later APDU carrying another value is
+ * SWO_INCORRECT_P1_P2):
  *   P1 = 0x00  BIP32 path.
  *              cdata = [path_len:1][path:4*path_len]
  *   P1 = 0x01  UserOp metadata (exactly 104 bytes):
@@ -39,10 +43,10 @@
  *   callData hash mismatch returns SWO_INCORRECT_DATA and wipes the accumulator.
  *
  * Response (async, after user approval): same layout as HYBRID_SIGN_HASH —
- * ECDSA sig inline, ML-DSA-44 pk/sig via GET_PK_CHUNK / GET_SIG_CHUNK.
- * P2 must be 0.
+ * ECDSA sig inline, ML-DSA pk/sig via GET_PK_CHUNK / GET_SIG_CHUNK (sizes of
+ * the parameter set).
  */
-int handler_hybrid_sign_userop(buffer_t *cdata, uint8_t p1);
+int handler_hybrid_sign_userop(buffer_t *cdata, uint8_t p1, MLDSA_param_t param);
 
 /**
  * Accessors used by the NBGL display layer. All pointers are into a static

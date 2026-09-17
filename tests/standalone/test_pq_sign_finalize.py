@@ -1,17 +1,13 @@
 """End-to-end SIGN_DILITHIUM finalize + UI approval + sig fetch.
 
-Currently skipped: ML-DSA-44 signing takes ~30-60 seconds on Nano-class
-devices in Speculos, which exceeds ragger's default 10 s `wait_for_screen_change`
-timeout. A proper fix needs either:
-  * an async signing pattern in the app (post-approval spinner + os_ux pump),
-    so a screen change happens before the slow sign starts blocking; or
-  * a global ragger fixture that raises the wait_for_screen_change ceiling
-    (a naive monkey-patch on SpeculosBackend didn't take; needs investigation).
+The review screen is a blind-signing flow (`nbgl_useCaseReviewBlindSigning` in
+src/ui/nbgl_display_pq_sign.c), so navigation must go through the
+`*_with_warning` scenarios — the plain `review_approve` / `review_reject`
+scenarios do not account for the warning page.
 
-Handler behavior is fully covered by test_pq_sign.py (state machine, error
-paths, cross-INS hygiene). What's missing here is only the review-screen
-golden snapshots and the round-trip sig assertion, both easy to add once
-the timing story is sorted.
+Handler behavior is covered by test_pq_sign.py (state machine, error paths,
+cross-INS hygiene); what this file adds is the review-screen golden snapshots
+and the round-trip signature assertions.
 """
 
 import pytest
@@ -20,11 +16,6 @@ from ragger.error import ExceptionRAPDU
 from ragger.navigator.navigation_scenario import NavigateWithScenario
 
 from application_client.boilerplate_command_sender import CLA, Errors, InsType
-
-pytestmark = pytest.mark.skip(
-    reason="MLDSA_sign wall time exceeds ragger's default screen-change timeout; "
-    "needs app-side async signing or ragger fixture upgrade. See file docstring."
-)
 
 
 P1_INIT = 0x00
@@ -74,7 +65,7 @@ def test_sign_dilithium_short_payload(
     with backend.exchange_async(
         cla=CLA, ins=InsType.SIGN_DILITHIUM, p1=P1_FINALIZE, p2=0, data=b""
     ) as _resp:
-        scenario_navigator.review_approve()
+        scenario_navigator.review_approve_with_warning()
 
     rapdu = backend.last_async_response
     assert rapdu.status == Errors.SWO_SUCCESS
@@ -90,13 +81,15 @@ def test_sign_dilithium_rejected_by_user(
 ) -> None:
     _prime_key(backend)
     _load_payload(backend, bytes(32))
-    with backend.exchange_async(
-        cla=CLA, ins=InsType.SIGN_DILITHIUM, p1=P1_FINALIZE, p2=0, data=b""
-    ) as _resp:
-        scenario_navigator.review_reject()
+    # A rejection answers 0x6985, which the backend surfaces as an exception
+    # rather than a status on last_async_response.
+    with pytest.raises(ExceptionRAPDU) as e:
+        with backend.exchange_async(
+            cla=CLA, ins=InsType.SIGN_DILITHIUM, p1=P1_FINALIZE, p2=0, data=b""
+        ) as _resp:
+            scenario_navigator.review_reject_with_warning()
+    assert e.value.status == Errors.SWO_CONDITIONS_NOT_SATISFIED
 
-    rapdu = backend.last_async_response
-    assert rapdu.status == Errors.SWO_CONDITIONS_NOT_SATISFIED
     # After rejection the sig buffer must be wiped.
     sig = _fetch_sig(backend)
     assert sig == b"\x00" * SIG_BYTES
@@ -112,7 +105,7 @@ def test_sign_dilithium_long_payload(
     with backend.exchange_async(
         cla=CLA, ins=InsType.SIGN_DILITHIUM, p1=P1_FINALIZE, p2=0, data=b""
     ) as _resp:
-        scenario_navigator.review_approve()
+        scenario_navigator.review_approve_with_warning()
 
     rapdu = backend.last_async_response
     assert rapdu.status == Errors.SWO_SUCCESS

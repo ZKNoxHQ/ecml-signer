@@ -30,6 +30,35 @@ class P2(IntEnum):
     P2_MORE = 0x80
 
 
+class MLDSAParam(IntEnum):
+    """ML-DSA parameter set, carried in P2 of the ML-DSA INS (0x00 keeps the
+    pre-existing ML-DSA-44 behaviour, so old clients are unaffected)."""
+
+    MLDSA_44 = 0x00
+    MLDSA_65 = 0x01
+
+    @property
+    def pk_bytes(self) -> int:
+        return 1312 if self is MLDSAParam.MLDSA_44 else 1952
+
+    @property
+    def sig_bytes(self) -> int:
+        return 2420 if self is MLDSAParam.MLDSA_44 else 3309
+
+    @property
+    def tau(self) -> int:
+        return 39 if self is MLDSAParam.MLDSA_44 else 49
+
+    @property
+    def ctilde_bytes(self) -> int:
+        return 32 if self is MLDSAParam.MLDSA_44 else 48
+
+    def chunk_sizes(self, total: int) -> list[int]:
+        """Split a length into the 255-byte chunks of GET_PK_CHUNK / GET_SIG_CHUNK."""
+        full, rest = divmod(total, MAX_APDU_LEN)
+        return [MAX_APDU_LEN] * full + ([rest] if rest else [])
+
+
 class InsType(IntEnum):
     GET_VERSION = 0x03
     GET_APP_NAME = 0x04
@@ -137,8 +166,116 @@ class BoilerplateCommandSender:
             yield response
 
     @contextmanager
-    def sign_tx_mldsa(self, path: str, transaction: bytes) -> Generator[None, None, None]:
-        with self._sign_transaction(InsType.SIGN_TX_MLDSA, path, transaction) as response:
+    def sign_tx_mldsa(
+        self,
+        path: str,
+        transaction: bytes,
+        param: MLDSAParam = MLDSAParam.MLDSA_44,
+    ) -> Generator[None, None, None]:
+        """SIGN_TX_MLDSA: the parameter set rides in the low bits of P2, beside
+        the 0x80 more-flag (P2 = more | param)."""
+        self.backend.exchange(
+            cla=CLA,
+            ins=InsType.SIGN_TX_MLDSA,
+            p1=P1.P1_START,
+            p2=P2.P2_MORE | param,
+            data=pack_derivation_path(path),
+        )
+        messages = split_message(transaction, MAX_APDU_LEN)
+        idx: int = P1.P1_START + 1
+
+        for msg in messages[:-1]:
+            self.backend.exchange(
+                cla=CLA, ins=InsType.SIGN_TX_MLDSA, p1=idx, p2=P2.P2_MORE | param, data=msg
+            )
+            idx += 1
+
+        with self.backend.exchange_async(
+            cla=CLA, ins=InsType.SIGN_TX_MLDSA, p1=idx, p2=P2.P2_LAST | param, data=messages[-1]
+        ) as response:
+            yield response
+
+    # ---------------------------------------------------------------- ML-DSA
+    def keygen_mldsa_seed(self, seed: bytes, param: MLDSAParam = MLDSAParam.MLDSA_44) -> RAPDU:
+        """KEYGEN_DILITHIUM_CORE (0x0c): deterministic keygen from a 32-byte seed."""
+        return self.backend.exchange(
+            cla=CLA, ins=InsType.KEYGEN_DILITHIUM_CORE, p1=0, p2=param, data=seed
+        )
+
+    def keygen_mldsa_path(self, path: str, param: MLDSAParam = MLDSAParam.MLDSA_44) -> RAPDU:
+        """KEYGEN_DILITHIUM (0x11): keygen from a BIP32 path (SLIP-0010)."""
+        return self.backend.exchange(
+            cla=CLA,
+            ins=InsType.KEYGEN_DILITHIUM,
+            p1=0,
+            p2=param,
+            data=pack_derivation_path(path),
+        )
+
+    def _fetch_chunks(self, ins: InsType, total: int) -> bytes:
+        out = b""
+        for i, size in enumerate(MLDSAParam.MLDSA_44.chunk_sizes(total)):
+            rapdu = self.backend.exchange(cla=CLA, ins=ins, p1=i, p2=size, data=b"")
+            assert rapdu.status == Errors.SWO_SUCCESS
+            assert len(rapdu.data) == size, f"chunk {i}: got {len(rapdu.data)}, expected {size}"
+            out += rapdu.data
+        return out
+
+    def get_mldsa_pk(self, param: MLDSAParam = MLDSAParam.MLDSA_44) -> bytes:
+        """GET_PK_CHUNK (0x13) over the whole public key of the parameter set."""
+        return self._fetch_chunks(InsType.GET_PK_CHUNK, param.pk_bytes)
+
+    def get_mldsa_sig(self, param: MLDSAParam = MLDSAParam.MLDSA_44) -> bytes:
+        """GET_SIG_CHUNK (0x12) over the whole signature of the parameter set."""
+        return self._fetch_chunks(InsType.GET_SIG_CHUNK, param.sig_bytes)
+
+    def sample_in_ball(self, c_tilde: bytes, param: MLDSAParam = MLDSAParam.MLDSA_44) -> RAPDU:
+        """SAMPLE_IN_BALL (0x0b) with the tau of the parameter set."""
+        return self.backend.exchange(
+            cla=CLA, ins=InsType.SAMPLE_IN_BALL, p1=0, p2=param, data=c_tilde
+        )
+
+    @contextmanager
+    def hybrid_sign_hash(
+        self,
+        path: str,
+        m_hash: bytes,
+        param: MLDSAParam = MLDSAParam.MLDSA_44,
+    ) -> Generator[None, None, None]:
+        """HYBRID_SIGN_HASH (0x16): ECDSA inline, ML-DSA via the chunk INS."""
+        assert len(m_hash) == 32
+        with self.backend.exchange_async(
+            cla=CLA,
+            ins=InsType.HYBRID_SIGN_HASH,
+            p1=0,
+            p2=param,
+            data=pack_derivation_path(path) + m_hash,
+        ) as response:
+            yield response
+
+    @contextmanager
+    def hybrid_sign_userop(
+        self,
+        path: str,
+        metadata: bytes,
+        packed: bytes,
+        call_data: bytes,
+        param: MLDSAParam = MLDSAParam.MLDSA_44,
+    ) -> Generator[None, None, None]:
+        """HYBRID_SIGN_USEROP (0x17): the 4-step sequence, P2 = parameter set
+        on every step."""
+        for p1, data in (
+            (0x00, pack_derivation_path(path)),
+            (0x01, metadata),
+            (0x02, packed),
+        ):
+            rapdu = self.backend.exchange(
+                cla=CLA, ins=InsType.HYBRID_SIGN_USEROP, p1=p1, p2=param, data=data
+            )
+            assert rapdu.status == Errors.SWO_SUCCESS
+        with self.backend.exchange_async(
+            cla=CLA, ins=InsType.HYBRID_SIGN_USEROP, p1=0x03, p2=param, data=call_data
+        ) as response:
             yield response
 
     # Retrieve the last asynchronous response from the backend
