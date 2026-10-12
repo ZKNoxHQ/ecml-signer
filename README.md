@@ -1,6 +1,6 @@
-[![Ensure compliance with Ledger guidelines](https://github.com/ZKNoxHQ/app-mldsa/actions/workflows/guidelines_enforcer.yml/badge.svg)](https://github.com/ZKNoxHQ/app-mldsa/actions/workflows/guidelines_enforcer.yml)
+[![Ensure compliance with Ledger guidelines](https://github.com/ZKNoxHQ/ecml-signer/actions/workflows/guidelines_enforcer.yml/badge.svg)](https://github.com/ZKNoxHQ/ecml-signer/actions/workflows/guidelines_enforcer.yml)
 
-[![Build and run functional tests using ragger through reusable workflow](https://github.com/ZKNoxHQ/app-mldsa/actions/workflows/build_and_functional_tests.yml/badge.svg?branch=master)](https://github.com/ZKNoxHQ/app-mldsa/actions/workflows/build_and_functional_tests.yml)
+[![Build and run functional tests using ragger through reusable workflow](https://github.com/ZKNoxHQ/ecml-signer/actions/workflows/build_and_functional_tests.yml/badge.svg?branch=master)](https://github.com/ZKNoxHQ/ecml-signer/actions/workflows/build_and_functional_tests.yml)
 
 # ECML-Signer
 
