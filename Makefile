@@ -81,6 +81,25 @@ VARIANT_VALUES = BOL
 # Enabling DEBUG flag will enable PRINTF for speculos
 #DEBUG = 1
 
+# Test-only INS, compiled in ONLY for debug builds:
+#   DUMMY (0x0a)                 echo, I/O smoke test
+#   SAMPLE_IN_BALL (0x0b)        raw ML-DSA SampleInBall over host input
+#   KEYGEN_DILITHIUM_CORE (0x0c) ML-DSA keygen from a HOST-SUPPLIED seed
+# 0x0c is the reason this gate exists: on a production build no host may drive
+# keygen with a seed of its choosing. They are needed by tests/standalone
+# (NIST ACVP vectors, primitive determinism), so those tests require a build
+# made with DEBUG=1 or TEST_INS=1.
+#
+# WARNING: object files do not depend on DEFINES, so switching TEST_INS on or
+# off over an existing build/ only relinks and silently keeps the old setting.
+# Always `rm -rf build/<target>` when changing it.
+ifeq ($(DEBUG), 1)
+    TEST_INS = 1
+endif
+ifeq ($(TEST_INS), 1)
+    DEFINES += HAVE_TEST_INS
+endif
+
 # Stack high-water mark printed on the Speculos console after every APDU
 # (src/debug/stack_watermark.c). Keeps the release optimisation level (-Oz,
 # not DEBUG's -Og) so the figure is the one of the production build; only
@@ -120,24 +139,11 @@ ENABLE_NBGL_QRCODE = 1
 #ENABLE_NBGL_KEYPAD = 1
 
 ########################################
-#       SWAP FEATURE FLAG      		   #
-# This flag enables the swap feature   #
-# in the Boilerplate application.      #
+#       SWAP FEATURE FLAG              #
 ########################################
-# This is a smart documentation inclusion. The full documentation is available at https://ledgerhq.github.io/app-exchange/
-# --8<-- [start:variables]
-ifeq ($(APPNAME), "ECML-Signer")
-# Two flags exist for enabling the SWAP
-#   - ENABLE_SWAP           will lead to the enabling of the swap related C code of the standard_app
-#                           AND will lead to the enabling of the APP_LOAD_PARAM required for os_lib_call working on device
-#   - ENABLE_TESTING_SWAP:  will lead to the enabling of the swap related C code of the standard_app
-#                           ONLY works on Speculos, not on device
-# Testing only SWAP flag
-ENABLE_TESTING_SWAP = 1
-# Production enabled SWAP flag
-# ENABLE_SWAP = 1
-endif
-# --8<-- [end:variables]
+# Swap (the Exchange app calling this app as a library) is deliberately NOT
+# enabled: neither ENABLE_SWAP nor ENABLE_TESTING_SWAP is set, so none of the
+# SDK's swap code is compiled in.
 
 ########################################
 #          TLV & PKI features          #

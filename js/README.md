@@ -1,6 +1,6 @@
-# app-mldsa JS CLI
+# ECML-Signer JS CLI
 
-Node CLI to keygen / sign a Transaction on a Ledger running app-mldsa, and
+Node CLI to keygen / sign a Transaction on a Ledger running ECML-Signer, and
 verify the signature off-chain.
 
 Verification currently runs locally via [`@noble/post-quantum`]. The
@@ -17,7 +17,7 @@ cd js
 npm install
 ```
 
-The Ledger must be connected via USB, unlocked, and running the app-mldsa app.
+The Ledger must be connected via USB, unlocked, and running the ECML-Signer app.
 On Linux you may need a udev rule for HID access — see
 `https://github.com/LedgerHQ/udev-rules`.
 

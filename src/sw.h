@@ -6,14 +6,8 @@
  */
 #define SW_INVALID_DYNAMIC_TOKEN 0xB009
 /**
- * Status word for swap failure
+ * Status word for a blind-signing operation refused because the user has not
+ * enabled blind signing in Settings. Fail closed: the device never downgrades
+ * to a blind review on its own.
  */
-#define SW_SWAP_FAIL 0xC000
-
-/**
- * Application specific swap error code context
- */
-typedef enum swap_error_application_specific_code_t {
-    SWAP_ERROR_CODE = 0x00,
-    SWAP_ERROR_WRONG_TOKEN_INFO = 0x01,
-} swap_error_application_specific_code_t;
+#define SW_BLIND_SIGNING_DISABLED 0xB00A

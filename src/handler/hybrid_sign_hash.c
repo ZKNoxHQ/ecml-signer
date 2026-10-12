@@ -35,7 +35,7 @@ int handler_hybrid_sign_hash(buffer_t *cdata, MLDSA_param_t param) {
     // rather than here, to close the ZKNOX pre-approval seed-exfiltration
     // window described in this handler's .h file.
 
-    G_context.state    = STATE_PARSED;
+    G_context.state = STATE_PARSED;
     G_context.req_type = CONFIRM_HYBRID_SIGN_HASH;
 
     return ui_display_hybrid_sign_hash();

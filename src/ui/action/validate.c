@@ -74,9 +74,9 @@ static int crypto_derive_and_sign_mldsa(const uint8_t *msg, size_t msg_len) {
     // it on the stack scoped to this call so it is scrubbed on return rather
     // than living in .bss.
     uint8_t sk[MLDSA_APP_MAX_SECRETKEYBYTES] = {0};
-    uint8_t seed[MLDSA_DERIVE_SEED_LEN]      = {0};
-    MLDSA_param_t param                      = G_context.tx_info.mldsa_param;
-    int status                               = -1;
+    uint8_t seed[MLDSA_DERIVE_SEED_LEN] = {0};
+    MLDSA_param_t param = G_context.tx_info.mldsa_param;
+    int status = -1;
 
     if (mldsa_derive_seed(G_context.bip32_path, G_context.bip32_path_len, param, seed) != 0) {
         PRINTF("mldsa_derive_seed failed\n");
@@ -129,8 +129,8 @@ static int crypto_sign_message_mldsa(void) {
 // G_context.tx_info.mldsa_sig and the client fetches it via chunks.
 static int crypto_pq_sign(void) {
     uint8_t sk[MLDSA_APP_MAX_SECRETKEYBYTES] = {0};
-    MLDSA_param_t param                      = G_context.tx_info.mldsa_param;
-    int status                               = -1;
+    MLDSA_param_t param = G_context.tx_info.mldsa_param;
+    int status = -1;
 
     // Re-derive sk from the stored seed. We regenerate the pk into a scratch
     // that we then overwrite the stored pk with (they should match, but this
@@ -176,7 +176,7 @@ void validate_pq_sign(bool choice) {
             // Fail closed: wipe sig so a stale chunk cannot be fetched.
             explicit_bzero(G_context.tx_info.mldsa_sig, sizeof(G_context.tx_info.mldsa_sig));
             G_context.tx_info.mldsa_sig_len = 0;
-            G_context.state                 = STATE_NONE;
+            G_context.state = STATE_NONE;
             io_send_sw(SWO_SECURITY_ISSUE);
         } else {
             io_send_sw(SWO_SUCCESS);
@@ -184,7 +184,7 @@ void validate_pq_sign(bool choice) {
     } else {
         explicit_bzero(G_context.tx_info.mldsa_sig, sizeof(G_context.tx_info.mldsa_sig));
         G_context.tx_info.mldsa_sig_len = 0;
-        G_context.state                 = STATE_NONE;
+        G_context.state = STATE_NONE;
         io_send_sw(SWO_CONDITIONS_NOT_SATISFIED);
     }
 }
@@ -219,7 +219,7 @@ void validate_hybrid_sign_hash(bool choice) {
         explicit_bzero(G_context.tx_info.mldsa_pk, sizeof(G_context.tx_info.mldsa_pk));
         explicit_bzero(G_context.tx_info.mldsa_sig, sizeof(G_context.tx_info.mldsa_sig));
         G_context.tx_info.mldsa_sig_len = 0;
-        G_context.state                 = STATE_NONE;
+        G_context.state = STATE_NONE;
         io_send_sw(SWO_SECURITY_ISSUE);
         return;
     }

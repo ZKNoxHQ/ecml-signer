@@ -39,6 +39,11 @@ static int keygen_common(void) {
     return io_send_sw(SWO_SUCCESS);
 }
 
+// Test-only (KEYGEN_DILITHIUM_CORE 0x0c): keygen from a HOST-SUPPLIED seed.
+// Needed for the NIST ACVP vectors, and compiled out of production builds so no
+// host can drive key generation with a seed of its choosing. The production
+// entry point is handler_cmd_keygen_dilithium below, which derives from BIP32.
+#ifdef HAVE_TEST_INS
 int handler_cmd_keygen_core_dilithium(buffer_t *cdata, MLDSA_param_t param) {
     if (cdata->size != MLDSA_DERIVE_SEED_LEN) {
         return io_send_sw(SWO_WRONG_DATA_LENGTH);
@@ -49,6 +54,7 @@ int handler_cmd_keygen_core_dilithium(buffer_t *cdata, MLDSA_param_t param) {
     memmove(G_context.tx_info.mldsa_seed, cdata->ptr, MLDSA_DERIVE_SEED_LEN);
     return keygen_common();
 }
+#endif  // HAVE_TEST_INS
 
 int handler_cmd_keygen_dilithium(buffer_t *cdata, MLDSA_param_t param) {
     explicit_bzero(&G_context, sizeof(G_context));

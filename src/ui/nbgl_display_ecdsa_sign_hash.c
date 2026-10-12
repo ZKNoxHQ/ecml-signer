@@ -19,7 +19,7 @@
 // 32-byte hash -> 64 hex chars + NUL, kept as a static buffer since NBGL
 // retains the pointer across the review flow.
 static char g_hash_hex[64 + 1];
-static nbgl_contentTagValue_t     hash_pairs[1];
+static nbgl_contentTagValue_t hash_pairs[1];
 static nbgl_contentTagValueList_t hash_pairList;
 
 static void ecdsa_hash_review_choice(bool confirm) {
@@ -45,13 +45,13 @@ int ui_display_ecdsa_sign_hash(void) {
         return io_send_sw(SWO_INCORRECT_DATA);
     }
 
-    hash_pairs[0].item  = "Hash";
+    hash_pairs[0].item = "Hash";
     hash_pairs[0].value = g_hash_hex;
 
     hash_pairList.nbMaxLinesForValue = 0;
-    hash_pairList.nbPairs            = 1;
-    hash_pairList.pairs              = hash_pairs;
-    hash_pairList.wrapping           = true;
+    hash_pairList.nbPairs = 1;
+    hash_pairList.pairs = hash_pairs;
+    hash_pairList.wrapping = true;
 
     const char *review_text = "Review\nhash to sign";
 #ifdef SCREEN_SIZE_WALLET
@@ -62,7 +62,7 @@ int ui_display_ecdsa_sign_hash(void) {
 
     nbgl_useCaseReviewBlindSigning(TYPE_TRANSACTION,
                                    &hash_pairList,
-                                   &ICON_APP_BOILERPLATE,
+                                   &ICON_APP,
                                    review_text,
                                    NULL,
                                    sign_text,

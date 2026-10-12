@@ -15,7 +15,7 @@
 static int send_chunk(const uint8_t *buf, size_t buf_size, uint8_t p1, uint8_t p2) {
     // Compute offset without risking uint32 overflow (p1*255 fits in uint32 for uint8).
     uint32_t offset = (uint32_t) p1 * PQ_CHUNK_STRIDE;
-    uint32_t end    = offset + (uint32_t) p2;
+    uint32_t end = offset + (uint32_t) p2;
 
     if (end > buf_size || end < offset) {
         return io_send_sw(SWO_WRONG_DATA_LENGTH);

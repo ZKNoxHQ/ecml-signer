@@ -59,6 +59,12 @@ class MLDSAParam(IntEnum):
         return [MAX_APDU_LEN] * full + ([rest] if rest else [])
 
 
+class SettingId(IntEnum):
+    """P1 values of SET_SETTING; mirrors src/handler/test_settings.c."""
+
+    BLIND_SIGNING = 0x00
+
+
 class InsType(IntEnum):
     GET_VERSION = 0x03
     GET_APP_NAME = 0x04
@@ -69,6 +75,7 @@ class InsType(IntEnum):
     DUMMY = 0x0A
     SAMPLE_IN_BALL = 0x0B
     KEYGEN_DILITHIUM_CORE = 0x0C
+    SET_SETTING = 0x0D
     SIGN_DILITHIUM = 0x0F
     KEYGEN_DILITHIUM = 0x11
     GET_SIG_CHUNK = 0x12
@@ -80,7 +87,10 @@ class InsType(IntEnum):
 
 
 # Custom error codes specific to Boilerplate app
-custom_errors = {"SW_INVALID_DYNAMIC_TOKEN": 0xB009, "SW_SWAP_FAIL": 0xC000}
+custom_errors = {
+    "SW_INVALID_DYNAMIC_TOKEN": 0xB009,
+    "SW_BLIND_SIGNING_DISABLED": 0xB00A,
+}
 
 # Build the combined dictionary first
 _errors_dict = {m.name: m.value for m in StatusWords}
@@ -185,9 +195,7 @@ class BoilerplateCommandSender:
         idx: int = P1.P1_START + 1
 
         for msg in messages[:-1]:
-            self.backend.exchange(
-                cla=CLA, ins=InsType.SIGN_TX_MLDSA, p1=idx, p2=P2.P2_MORE | param, data=msg
-            )
+            self.backend.exchange(cla=CLA, ins=InsType.SIGN_TX_MLDSA, p1=idx, p2=P2.P2_MORE | param, data=msg)
             idx += 1
 
         with self.backend.exchange_async(
@@ -198,9 +206,7 @@ class BoilerplateCommandSender:
     # ---------------------------------------------------------------- ML-DSA
     def keygen_mldsa_seed(self, seed: bytes, param: MLDSAParam = MLDSAParam.MLDSA_44) -> RAPDU:
         """KEYGEN_DILITHIUM_CORE (0x0c): deterministic keygen from a 32-byte seed."""
-        return self.backend.exchange(
-            cla=CLA, ins=InsType.KEYGEN_DILITHIUM_CORE, p1=0, p2=param, data=seed
-        )
+        return self.backend.exchange(cla=CLA, ins=InsType.KEYGEN_DILITHIUM_CORE, p1=0, p2=param, data=seed)
 
     def keygen_mldsa_path(self, path: str, param: MLDSAParam = MLDSAParam.MLDSA_44) -> RAPDU:
         """KEYGEN_DILITHIUM (0x11): keygen from a BIP32 path (SLIP-0010)."""
@@ -216,7 +222,7 @@ class BoilerplateCommandSender:
         out = b""
         for i, size in enumerate(MLDSAParam.MLDSA_44.chunk_sizes(total)):
             rapdu = self.backend.exchange(cla=CLA, ins=ins, p1=i, p2=size, data=b"")
-            assert rapdu.status == Errors.SWO_SUCCESS
+            assert rapdu.status == StatusWords.SWO_SUCCESS
             assert len(rapdu.data) == size, f"chunk {i}: got {len(rapdu.data)}, expected {size}"
             out += rapdu.data
         return out
@@ -229,11 +235,17 @@ class BoilerplateCommandSender:
         """GET_SIG_CHUNK (0x12) over the whole signature of the parameter set."""
         return self._fetch_chunks(InsType.GET_SIG_CHUNK, param.sig_bytes)
 
+    def set_setting(self, setting: SettingId, enabled: bool) -> RAPDU:
+        """Write an NVM setting directly (SET_SETTING, test builds only).
+
+        Bypasses the Settings UI so a test can reach a known state on every
+        device. The UI path has its own coverage in test_blind_signing.py.
+        """
+        return self.backend.exchange(cla=CLA, ins=InsType.SET_SETTING, p1=setting, p2=int(enabled), data=b"")
+
     def sample_in_ball(self, c_tilde: bytes, param: MLDSAParam = MLDSAParam.MLDSA_44) -> RAPDU:
         """SAMPLE_IN_BALL (0x0b) with the tau of the parameter set."""
-        return self.backend.exchange(
-            cla=CLA, ins=InsType.SAMPLE_IN_BALL, p1=0, p2=param, data=c_tilde
-        )
+        return self.backend.exchange(cla=CLA, ins=InsType.SAMPLE_IN_BALL, p1=0, p2=param, data=c_tilde)
 
     @contextmanager
     def hybrid_sign_hash(
@@ -269,10 +281,8 @@ class BoilerplateCommandSender:
             (0x01, metadata),
             (0x02, packed),
         ):
-            rapdu = self.backend.exchange(
-                cla=CLA, ins=InsType.HYBRID_SIGN_USEROP, p1=p1, p2=param, data=data
-            )
-            assert rapdu.status == Errors.SWO_SUCCESS
+            rapdu = self.backend.exchange(cla=CLA, ins=InsType.HYBRID_SIGN_USEROP, p1=p1, p2=param, data=data)
+            assert rapdu.status == StatusWords.SWO_SUCCESS
         with self.backend.exchange_async(
             cla=CLA, ins=InsType.HYBRID_SIGN_USEROP, p1=0x03, p2=param, data=call_data
         ) as response:
@@ -284,8 +294,7 @@ class BoilerplateCommandSender:
 
     # Synchronous versions of sign_tx and sign_token_tx
     # These functions wait for the response after sending the transaction. They are particularly
-    # useful for tests that do not require user interaction (e.g., when the transaction as already
-    # been approved in the SWAP flow)
+    # useful for tests that expect the device to refuse the transaction before any review.
     def sign_tx_sync(self, path: str, transaction: bytes) -> RAPDU | None:
         with self.sign_tx(path, transaction):
             pass

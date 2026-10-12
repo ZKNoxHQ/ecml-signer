@@ -5,6 +5,61 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Blind signing is now opt-in.** A `Blind signing` switch in the app Settings,
+  stored in NVM and **off** on a fresh install; turning it on requires
+  confirming a warning screen. Instructions that sign bytes the review screen
+  cannot represent are refused with the new status word
+  `SW_BLIND_SIGNING_DISABLED` (`0xB00A`) until the user enables it:
+  `ECDSA_SIGN_HASH` (0x15), `HYBRID_SIGN_HASH` (0x16), `SIGN_DILITHIUM` (0x0F),
+  and `HYBRID_SIGN_USEROP` (0x17) **only** when the `callData` preimage is
+  withheld. A UserOp sent with its `callData` is clear-signed and keeps working
+  with the setting off.
+- `SET_SETTING` (0x0D), a test-only instruction for putting the device in a
+  known settings state without driving the UI.
+
+### Changed
+
+- **BREAKING (hosts):** the four instructions above now answer `0xB00A` on a
+  fresh install instead of signing. A host that needs them must tell the user
+  to enable `Blind signing` in the app Settings first.
+- **BREAKING (test harness):** the test-only instructions `DUMMY` (0x0A),
+  `SAMPLE_IN_BALL` (0x0B) and `KEYGEN_DILITHIUM_CORE` (0x0C) are compiled out of
+  production builds and answer `SWO_INVALID_INS` there. `KEYGEN_DILITHIUM_CORE`
+  ran key generation from a host-supplied seed, which must not be reachable on a
+  device holding funds. Build with `TEST_INS=1` (implied by `DEBUG=1`) to run
+  `tests/standalone`. Note object files do not depend on `DEFINES`, so switching
+  the flag requires removing `build/<target>` first.
+- The settings menu no longer carries the two boilerplate `Dummy` switches. The
+  NVM layout changed with them; existing installs re-initialise to the defaults
+  on first run, which lands with blind signing off.
+- The blind-sign branch of `SIGN_TX` triggers on the transaction memo, which is
+  attacker-controlled; it is now behind the opt-in. It is demo code inherited
+  from the boilerplate and should be removed.
+
+### Removed
+
+- **Swap support.** The app can no longer be called as a library by the
+  Exchange app (`os_lib_call`): `ENABLE_TESTING_SWAP` is off, and `src/swap/`,
+  the swap branches of `SIGN_TX` and `app_main`, `SW_SWAP_FAIL` (`0xC000`),
+  `tests/swap/` and the `tests_swap` CI job are gone. It was boilerplate demo
+  code (production `ENABLE_SWAP` was never on), it still looked the app up as
+  "Boilerplate" so it had been broken since the rename, and it compiled swap
+  code into every release binary.
+
+### Fixed
+
+- `HYBRID_SIGN_USEROP` has end-to-end coverage for the first time (finalize,
+  clear-signing review, both signature halves, user rejection), for both
+  parameter sets, with the userOpHash verified against an independent
+  reimplementation of the ERC-4337 v0.7 construction.
+- The `SIGN_DILITHIUM` finalize tests are no longer skipped; they needed the
+  `*_with_warning` navigation scenarios, not the timing fix their docstring
+  claimed.
+
 ## [2.4.0] - 2026-09-16
 
 ### Added

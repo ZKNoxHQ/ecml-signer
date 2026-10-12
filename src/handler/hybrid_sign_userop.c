@@ -45,10 +45,10 @@ typedef struct {
 
     uint8_t call_to[20];
     uint8_t call_value[32];
-    bool    has_call_info;
+    bool has_call_info;
 
     MLDSA_param_t param;  // ML-DSA parameter set fixed by the P1 = 0x00 APDU
-    uint8_t       step;   // tracks which P1 we expect next
+    uint8_t step;         // tracks which P1 we expect next
 } userop_ctx_t;
 
 static userop_ctx_t userop_ctx;
@@ -73,7 +73,7 @@ static int keccak_absorb_address(cx_sha3_t *ctx, const uint8_t *addr20) {
 // Result goes into G_context.tx_info.m_hash.
 static int compute_userop_hash(void) {
     cx_sha3_t kctx;
-    uint8_t   inner_hash[32] = {0};
+    uint8_t inner_hash[32] = {0};
 
     // 1. Inner hash: keccak256(abi.encode(packed fields))
     if (cx_keccak_init_no_throw(&kctx, 256) != CX_OK) return -1;
@@ -87,8 +87,8 @@ static int compute_userop_hash(void) {
     if (keccak_absorb_word(&kctx, userop_ctx.gas_fees) != CX_OK) return -1;
     if (keccak_absorb_word(&kctx, userop_ctx.hash_paymaster_and_data) != CX_OK) return -1;
 
-    if (cx_hash_no_throw((cx_hash_t *) &kctx, CX_LAST, NULL, 0, inner_hash, sizeof(inner_hash))
-        != CX_OK) {
+    if (cx_hash_no_throw((cx_hash_t *) &kctx, CX_LAST, NULL, 0, inner_hash, sizeof(inner_hash)) !=
+        CX_OK) {
         return -1;
     }
 
@@ -102,8 +102,7 @@ static int compute_userop_hash(void) {
                          userop_ctx.chain_id,
                          32,
                          G_context.tx_info.m_hash,
-                         sizeof(G_context.tx_info.m_hash))
-        != CX_OK) {
+                         sizeof(G_context.tx_info.m_hash)) != CX_OK) {
         return -1;
     }
 
@@ -124,11 +123,11 @@ static int process_calldata(const uint8_t *data, uint16_t len) {
     }
 
     cx_sha3_t kctx;
-    uint8_t   computed[32] = {0};
+    uint8_t computed[32] = {0};
 
     if (cx_keccak_init_no_throw(&kctx, 256) != CX_OK) return -1;
-    if (cx_hash_no_throw((cx_hash_t *) &kctx, CX_LAST, data, len, computed, sizeof(computed))
-        != CX_OK) {
+    if (cx_hash_no_throw((cx_hash_t *) &kctx, CX_LAST, data, len, computed, sizeof(computed)) !=
+        CX_OK) {
         explicit_bzero(computed, sizeof(computed));
         return -1;
     }
@@ -140,8 +139,8 @@ static int process_calldata(const uint8_t *data, uint16_t len) {
     }
 
     // Try to parse execute(address dest, uint256 value, bytes data).
-    if (len >= EXECUTE_MIN_LEN && data[0] == EXECUTE_SELECTOR_0 && data[1] == EXECUTE_SELECTOR_1
-        && data[2] == EXECUTE_SELECTOR_2 && data[3] == EXECUTE_SELECTOR_3) {
+    if (len >= EXECUTE_MIN_LEN && data[0] == EXECUTE_SELECTOR_0 && data[1] == EXECUTE_SELECTOR_1 &&
+        data[2] == EXECUTE_SELECTOR_2 && data[3] == EXECUTE_SELECTOR_3) {
         // dest is right-aligned in a 32-byte ABI word starting at offset 4.
         memmove(userop_ctx.call_to, data + 4 + 12, 20);
         // value is a full 32-byte word at offset 36.
@@ -241,6 +240,14 @@ int handler_hybrid_sign_userop(buffer_t *cdata, uint8_t p1, MLDSA_param_t param)
 
             uint16_t remaining = cdata->size - cdata->offset;
 
+            // Withholding the callData preimage downgrades the review to the
+            // bare userOpHash, i.e. blind signing. Refuse unless the user has
+            // opted in, and wipe the accumulated UserOp on the way out.
+            if (remaining == 0 && !BLIND_SIGNING_ALLOWED()) {
+                explicit_bzero(&userop_ctx, sizeof(userop_ctx));
+                return io_send_sw(SW_BLIND_SIGNING_DISABLED);
+            }
+
             if (process_calldata(cdata->ptr + cdata->offset, remaining) != 0) {
                 explicit_bzero(&userop_ctx, sizeof(userop_ctx));
                 return io_send_sw(SWO_INCORRECT_DATA);
@@ -252,9 +259,9 @@ int handler_hybrid_sign_userop(buffer_t *cdata, uint8_t p1, MLDSA_param_t param)
             }
 
             G_context.tx_info.mldsa_param = userop_ctx.param;
-            G_context.req_type            = CONFIRM_HYBRID_SIGN_USEROP;
-            G_context.state               = STATE_PARSED;
-            userop_ctx.step               = 0xFF;
+            G_context.req_type = CONFIRM_HYBRID_SIGN_USEROP;
+            G_context.state = STATE_PARSED;
+            userop_ctx.step = 0xFF;
 
             return ui_display_hybrid_sign_userop();
         }
@@ -268,8 +275,18 @@ int handler_hybrid_sign_userop(buffer_t *cdata, uint8_t p1, MLDSA_param_t param)
 // Accessors for the NBGL display layer
 // ---------------------------------------------------------------------------
 
-const uint8_t *userop_get_sender(void)     { return userop_ctx.sender; }
-const uint8_t *userop_get_chain_id(void)   { return userop_ctx.chain_id; }
-const uint8_t *userop_get_call_to(void)    { return userop_ctx.call_to; }
-const uint8_t *userop_get_call_value(void) { return userop_ctx.call_value; }
-bool           userop_has_call_info(void)  { return userop_ctx.has_call_info; }
+const uint8_t *userop_get_sender(void) {
+    return userop_ctx.sender;
+}
+const uint8_t *userop_get_chain_id(void) {
+    return userop_ctx.chain_id;
+}
+const uint8_t *userop_get_call_to(void) {
+    return userop_ctx.call_to;
+}
+const uint8_t *userop_get_call_value(void) {
+    return userop_ctx.call_value;
+}
+bool userop_has_call_info(void) {
+    return userop_ctx.has_call_info;
+}

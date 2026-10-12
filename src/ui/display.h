@@ -2,18 +2,22 @@
 
 #include <stdbool.h>  // bool
 
+// NOTE: the glyphs themselves are still the Ledger boilerplate artwork
+// (glyphs/app_boilerplate_*, glyphs/home_boilerplate_14px). ECML-Signer needs
+// its own icon set before release; replacing the files under glyphs/ and the
+// C_* names below is all that is required, the macro names stay.
 #if defined(TARGET_NANOX) || defined(TARGET_NANOS2)
-#define ICON_APP_BOILERPLATE C_app_boilerplate_14px
-#define ICON_APP_HOME        C_home_boilerplate_14px
-#define ICON_APP_WARNING     C_icon_warning
+#define ICON_APP         C_app_boilerplate_14px
+#define ICON_APP_HOME    C_home_boilerplate_14px
+#define ICON_APP_WARNING C_icon_warning
 #elif defined(TARGET_STAX) || defined(TARGET_FLEX)
-#define ICON_APP_BOILERPLATE C_app_boilerplate_64px
-#define ICON_APP_HOME        ICON_APP_BOILERPLATE
-#define ICON_APP_WARNING     C_Warning_64px
+#define ICON_APP         C_app_boilerplate_64px
+#define ICON_APP_HOME    ICON_APP
+#define ICON_APP_WARNING C_Warning_64px
 #elif defined(TARGET_APEX_P)
-#define ICON_APP_BOILERPLATE C_app_boilerplate_48px
-#define ICON_APP_HOME        ICON_APP_BOILERPLATE
-#define ICON_APP_WARNING     LARGE_WARNING_ICON
+#define ICON_APP         C_app_boilerplate_48px
+#define ICON_APP_HOME    ICON_APP
+#define ICON_APP_WARNING LARGE_WARNING_ICON
 #endif
 
 /**

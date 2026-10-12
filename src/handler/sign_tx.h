@@ -31,8 +31,8 @@
  *
  */
 int handler_sign_tx(buffer_t *cdata,
-                    uint8_t   chunk,
-                    bool      more,
-                    bool      is_token_tx,
-                    bool      is_mldsa,
+                    uint8_t chunk,
+                    bool more,
+                    bool is_token_tx,
+                    bool is_mldsa,
                     MLDSA_param_t param);

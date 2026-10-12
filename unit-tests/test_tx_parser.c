@@ -9,7 +9,7 @@
 
 #include "transaction/serialize.h"
 #include "transaction/deserialize.h"
-#include "types.h"
+#include "transaction/tx_types.h"
 
 static void test_tx_serialization(void **state) {
     (void) state;

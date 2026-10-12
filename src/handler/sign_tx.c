@@ -23,7 +23,6 @@
 #include "os.h"
 #include "cx.h"
 #include "buffer.h"
-#include "swap.h"
 
 #include "sign_tx.h"
 #include "sw.h"
@@ -31,43 +30,9 @@
 #include "display.h"
 #include "tx_types.h"
 #include "deserialize.h"
-#include "handle_swap.h"
 #include "validate.h"
 #include "token_db.h"
-#include "swap_error_code_helpers.h"
 #include "dynamic_token_info.h"
-
-// This is a smart documentation inclusion. The full documentation is available at
-// https://ledgerhq.github.io/app-exchange/
-// --8<-- [start:ui_bypass]
-#ifdef HAVE_SWAP
-static int check_and_sign_swap_tx(transaction_ctx_t *tx_ctx) {
-    if (G_swap_response_ready) {
-        // Safety against trying to make the app sign multiple TX
-        // This code should never be triggered as the app is supposed to exit after
-        // sending the signed transaction
-        PRINTF("Safety against double signing triggered\n");
-        os_sched_exit(-1);
-    } else {
-        // We will quit the app after this transaction, whether it succeeds or fails
-        PRINTF("Swap response is ready, the app will quit after the next send\n");
-        // This boolean will make the io_send_sw family instant reply + return to exchange
-        G_swap_response_ready = true;
-    }
-    if (swap_check_validity(tx_ctx->transaction.value,
-                            tx_ctx->transaction.fee,
-                            tx_ctx->transaction.to,
-                            &tx_ctx->token_info)) {
-        PRINTF("Swap response validated, sign the transaction\n");
-        validate_transaction(true);
-    }
-    // Unreachable because swap_check_validity() returns an error to exchange app OR
-    // validate_transaction() returns a success to exchange
-    os_sched_exit(0);
-    return 0;
-}
-#endif  // HAVE_SWAP
-// --8<-- [end:ui_bypass]
 
 /**
  * Initialize transaction context for chunk 0
@@ -77,8 +42,8 @@ static int check_and_sign_swap_tx(transaction_ctx_t *tx_ctx) {
  * @return SWO_SUCCESS on success, error code otherwise
  */
 static int init_transaction_context(buffer_t *cdata,
-                                    uint8_t   req_type,
-                                    bool      is_mldsa,
+                                    uint8_t req_type,
+                                    bool is_mldsa,
                                     MLDSA_param_t param) {
     explicit_bzero(&G_context, sizeof(G_context));
     G_context.req_type = req_type;
@@ -155,10 +120,10 @@ static uint16_t process_transaction(bool is_token_tx) {
 }
 
 int handler_sign_tx(buffer_t *cdata,
-                    uint8_t   chunk,
-                    bool      more,
-                    bool      is_token_tx,
-                    bool      is_mldsa,
+                    uint8_t chunk,
+                    bool more,
+                    bool is_token_tx,
+                    bool is_mldsa,
                     MLDSA_param_t param) {
     uint8_t req_type = is_token_tx ? CONFIRM_TOKEN_TRANSACTION : CONFIRM_TRANSACTION;
     if (chunk == 0) {
@@ -184,31 +149,19 @@ int handler_sign_tx(buffer_t *cdata,
             // last APDU for this transaction, let's parse, display and request a sign confirmation
             err = process_transaction(is_token_tx);
             if (err != SWO_SUCCESS) {
-#ifdef HAVE_SWAP
-                if (G_called_from_swap) {
-                    PRINTF("Error during transaction processing in swap context: %u\n", err);
-                    // Suspicious error, Return to Exchange instead of simply return an error APDU
-                    send_swap_error_simple(SW_SWAP_FAIL, SWAP_EC_ERROR_GENERIC, SWAP_ERROR_CODE);
-                } else {
-                    return io_send_sw(err);
-                }
-#else
                 return io_send_sw(err);
-#endif
             }
 
-#ifdef HAVE_SWAP
-            // If we are in swap context, do not redisplay the message data
-            // Instead, ensure they are identical with what was previously displayed
-            if (G_called_from_swap) {
-                check_and_sign_swap_tx(&G_context.tx_info);
-                // Unreachable
-                return 0;
-            }
-#endif  // HAVE_SWAP
-
-            // Example to trig a blind-sign flow
+            // Example to trig a blind-sign flow.
+            // NOTE: the trigger is the memo, which is attacker-controlled, so a
+            // crafted transaction can ask for the blind review instead of the
+            // clear one. Gated on the user's opt-in; this demo branch should be
+            // deleted outright once nothing depends on it.
             if (strcmp((char *) G_context.tx_info.transaction.memo, "Blind-sign") == 0) {
+                if (!BLIND_SIGNING_ALLOWED()) {
+                    G_context.state = STATE_NONE;
+                    return io_send_sw(SW_BLIND_SIGNING_DISABLED);
+                }
                 return ui_display_blind_signed_transaction();
             } else if (is_token_tx) {
                 return ui_display_token_transaction();

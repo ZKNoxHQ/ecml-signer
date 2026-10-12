@@ -35,7 +35,7 @@ void stack_watermark_get(uint32_t *used, uint32_t *total) {
     while (p < &_estack && *p == WATERMARK_PATTERN) {
         p++;
     }
-    *used  = (uint32_t) (&_estack - p);
+    *used = (uint32_t) (&_estack - p);
     *total = (uint32_t) (&_estack - &_stack);
 }
 

@@ -13,6 +13,11 @@
 #include "stack_watermark.h"
 #include "sw.h"
 
+// Both handlers below are test-only (DUMMY 0x0a, SAMPLE_IN_BALL 0x0b) and are
+// compiled out of production builds, so the code is absent from the binary
+// rather than merely unreachable. See HAVE_TEST_INS in the Makefile.
+#ifdef HAVE_TEST_INS
+
 int handler_cmd_dummy(buffer_t *cdata) {
 #ifdef HAVE_STACK_WATERMARK
     // DEBUG_STACK_WATERMARK=1 builds: echo || used(4 BE) || total(4 BE), so a
@@ -45,3 +50,5 @@ int handler_cmd_sample_in_ball(buffer_t *cdata, MLDSA_param_t param) {
 
     return io_send_response_pointer((const uint8_t *) c.coeffs, sizeof(c.coeffs), SWO_SUCCESS);
 }
+
+#endif  // HAVE_TEST_INS

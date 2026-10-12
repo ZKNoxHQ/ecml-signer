@@ -14,7 +14,7 @@ This directory contains the token infrastructure for the Boilerplate application
 
 - Add token metadata directly in `TOKENS` array
 - No coordination with Ledger needed
-- Works for both send and swap operations
+- Works for send operations (this app does not support the Exchange/swap flow)
 - Recommended for most third-party apps
 
 **Example:**
@@ -30,7 +30,6 @@ This directory contains the token infrastructure for the Boilerplate application
 **Limitations:**
 
 - Requires app update to add new tokens
-- For SWAP support, token must be added to CAL database (contact Ledger - quick process)
 
 ### 2. Dynamic Tokens (Complex - Requires Ledger Coordination)
 
@@ -82,7 +81,6 @@ This is a design choice to keep the implementation minimalist and focused on the
 - **Hardcoded tokens:** You simply need to craft and send token transaction relevant to your hardcoded database.
 - **Dynamic tokens:** More complex to test, a fake CAL must be mocked and whitelisted on the device PKI
   by sending a test certificate. WILL NOT work on a real device, the test certificate will be rejected.
-- **SWAP tokens:** Simply a token test done through the ExchangeTestRunner to emulate start from the Exchange application.
 
 ## Security Notes
 
@@ -95,4 +93,3 @@ This is a design choice to keep the implementation minimalist and focused on the
 
 - Hardcoded tokens: Fork and implement (no questions needed)
 - Dynamic tokens: Contact Ledger developer support
-- SWAP integration: Contact Ledger developer support

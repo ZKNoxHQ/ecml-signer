@@ -17,6 +17,9 @@ from ragger.navigator.navigation_scenario import NavigateWithScenario
 
 from application_client.boilerplate_command_sender import CLA, Errors, InsType
 
+# SIGN_DILITHIUM signs an opaque payload shown only as a hex preview.
+pytestmark = pytest.mark.usefixtures("blind_signing_enabled")
+
 
 P1_INIT = 0x00
 P1_ABSORB = 0x01

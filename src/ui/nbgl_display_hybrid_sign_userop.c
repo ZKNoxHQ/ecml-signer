@@ -31,7 +31,7 @@ static char g_userop_scheme[8 + 9 + 1];
 
 // Up to 6 pairs: signer / chain / sender / to / value / hash-fallback. Only
 // one of (to+value) vs (hash) is populated at a time, so max 5 in practice.
-static nbgl_contentTagValue_t     userop_pairs[6];
+static nbgl_contentTagValue_t userop_pairs[6];
 static nbgl_contentTagValueList_t userop_pairList;
 
 // Big-endian uint256 → decimal string, if it fits in uint64_t. Returns false
@@ -52,7 +52,7 @@ static bool uint256_be_to_dec(const uint8_t be[32], char *out, size_t out_len) {
         return true;
     }
     char tmp[21];  // UINT64_MAX has 20 digits + NUL
-    int  pos = 0;
+    int pos = 0;
     while (v > 0 && pos < (int) sizeof(tmp) - 1) {
         tmp[pos++] = '0' + (char) (v % 10);
         v /= 10;
@@ -101,52 +101,50 @@ int ui_display_hybrid_sign_userop(void) {
              sizeof(g_userop_scheme),
              "ECDSA + %s",
              mldsa_param_name(G_context.tx_info.mldsa_param));
-    userop_pairs[pair_index].item  = "Signer";
+    userop_pairs[pair_index].item = "Signer";
     userop_pairs[pair_index].value = g_userop_scheme;
     pair_index++;
 
     if (uint256_be_to_dec(userop_get_chain_id(), g_userop_chain, sizeof(g_userop_chain))) {
-        userop_pairs[pair_index].item  = "Chain ID";
+        userop_pairs[pair_index].item = "Chain ID";
         userop_pairs[pair_index].value = g_userop_chain;
         pair_index++;
     }
 
     if (format_hex(userop_get_sender(), 20, g_userop_sender, sizeof(g_userop_sender)) != -1) {
-        userop_pairs[pair_index].item  = "Sender";
+        userop_pairs[pair_index].item = "Sender";
         userop_pairs[pair_index].value = g_userop_sender;
         pair_index++;
     }
 
     if (userop_has_call_info()) {
         if (format_hex(userop_get_call_to(), 20, g_userop_to, sizeof(g_userop_to)) != -1) {
-            userop_pairs[pair_index].item  = "To";
+            userop_pairs[pair_index].item = "To";
             userop_pairs[pair_index].value = g_userop_to;
             pair_index++;
         }
         // Decimal wei if it fits in uint64; hex fallback otherwise.
-        if (!uint256_be_to_dec(userop_get_call_value(),
-                               g_userop_value,
-                               sizeof(g_userop_value))) {
+        if (!uint256_be_to_dec(userop_get_call_value(), g_userop_value, sizeof(g_userop_value))) {
             format_hex(userop_get_call_value(), 32, g_userop_value, sizeof(g_userop_value));
         }
         if (g_userop_value[0] != '\0') {
-            userop_pairs[pair_index].item  = "Value (wei)";
+            userop_pairs[pair_index].item = "Value (wei)";
             userop_pairs[pair_index].value = g_userop_value;
             pair_index++;
         }
     } else {
         // No callData parsed — show the computed UserOpHash for transparency.
         if (format_hex(G_context.tx_info.m_hash, 32, g_userop_hash, sizeof(g_userop_hash)) != -1) {
-            userop_pairs[pair_index].item  = "UserOp Hash";
+            userop_pairs[pair_index].item = "UserOp Hash";
             userop_pairs[pair_index].value = g_userop_hash;
             pair_index++;
         }
     }
 
     userop_pairList.nbMaxLinesForValue = 0;
-    userop_pairList.nbPairs            = pair_index;
-    userop_pairList.pairs              = userop_pairs;
-    userop_pairList.wrapping           = true;
+    userop_pairList.nbPairs = pair_index;
+    userop_pairList.pairs = userop_pairs;
+    userop_pairList.wrapping = true;
 
     const char *review_text = "Review UserOp\nfor hybrid signing";
 #ifdef SCREEN_SIZE_WALLET
@@ -160,7 +158,7 @@ int ui_display_hybrid_sign_userop(void) {
     // in both cases — the pair list content differs, not the flow.
     nbgl_useCaseReview(TYPE_TRANSACTION,
                        &userop_pairList,
-                       &ICON_APP_BOILERPLATE,
+                       &ICON_APP,
                        review_text,
                        NULL,
                        sign_text,

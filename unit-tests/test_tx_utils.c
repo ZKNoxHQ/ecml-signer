@@ -8,7 +8,7 @@
 #include <cmocka.h>
 
 #include "transaction/utils.h"
-#include "types.h"
+#include "transaction/tx_types.h"
 
 static void test_tx_utils(void **state) {
     (void) state;

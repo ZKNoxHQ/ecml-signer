@@ -20,7 +20,22 @@ from ragger.backend.interface import BackendInterface
 from ragger.bip import pack_derivation_path
 from ragger.error import ExceptionRAPDU
 
-from application_client.boilerplate_command_sender import CLA, Errors, InsType
+from cryptography.hazmat.primitives.asymmetric import mldsa
+from ragger.navigator.navigation_scenario import NavigateWithScenario
+
+from application_client.boilerplate_command_sender import (
+    CLA,
+    BoilerplateCommandSender,
+    Errors,
+    InsType,
+    MLDSAParam,
+)
+from application_client.boilerplate_response_unpacker import unpack_sign_tx_response
+
+PUBKEY_CLS = {
+    MLDSAParam.MLDSA_44: mldsa.MLDSA44PublicKey,
+    MLDSAParam.MLDSA_65: mldsa.MLDSA65PublicKey,
+}
 
 P1_PATH     = 0x00
 P1_METADATA = 0x01
@@ -60,7 +75,8 @@ HASH_PAYMASTER     = bytes(32)
 METADATA = CHAIN_ID + ENTRY_POINT + SENDER + NONCE                          # 104 B
 PACKED   = (HASH_INIT_CODE + HASH_CALL_DATA + ACCOUNT_GAS_LIMITS +
             PRE_VERIF_GAS + GAS_FEES + HASH_PAYMASTER)                       # 192 B
-PATH     = pack_derivation_path("m/44'/1'/0'/0'/0'")
+PATH_STR = "m/44'/1'/0'/0'/0'"
+PATH     = pack_derivation_path(PATH_STR)
 
 
 def _p1(backend: BackendInterface, p1: int, data: bytes) -> None:
@@ -229,3 +245,90 @@ def test_path_always_resets(backend: BackendInterface) -> None:
     _p1(backend, P1_PATH, PATH)               # reset
     _p1(backend, P1_METADATA, METADATA)       # would fail if not reset
     _p1(backend, P1_PACKED, PACKED)
+
+
+# ---- End to end: finalize -> clear-sign review -> hybrid signature ------
+#
+# These are the only tests that drive P1=0x03, so they are what actually covers
+# the userOpHash construction, the callData verification and the clear-signing
+# screens. No blind_signing_enabled fixture on purpose: a UserOp with its
+# callData present is clear-signed and must work with the setting off.
+
+
+def _userop_hash(metadata: bytes, packed: bytes) -> bytes:
+    """Mirror of compute_userop_hash() in src/handler/hybrid_sign_userop.c.
+
+    inner      = keccak256(sender || nonce || packed)   (sender left-padded)
+    userOpHash = keccak256(inner || entryPoint || chainId)  (entryPoint padded)
+    """
+    chain_id, entry_point, sender, nonce = (
+        metadata[0:32],
+        metadata[32:52],
+        metadata[52:72],
+        metadata[72:104],
+    )
+    inner = _keccak256(bytes(12) + sender + nonce + packed)
+    return _keccak256(inner + bytes(12) + entry_point + chain_id)
+
+
+@pytest.mark.parametrize(
+    "param", [MLDSAParam.MLDSA_44, MLDSAParam.MLDSA_65], ids=lambda p: p.name
+)
+def test_userop_clear_sign_end_to_end(
+    backend: BackendInterface, scenario_navigator: NavigateWithScenario, param: MLDSAParam
+) -> None:
+    """Approve a clear-signed UserOp and check both halves of the signature.
+
+    The ML-DSA half must verify against the userOpHash computed here, which is
+    an independent reimplementation of the device's ERC-4337 v0.7 hashing: if
+    the two constructions ever diverge, verification fails.
+    """
+    client = BoilerplateCommandSender(backend)
+
+    with client.hybrid_sign_userop(
+        path=PATH_STR, metadata=METADATA, packed=PACKED, call_data=CALLDATA, param=param
+    ):
+        scenario_navigator.review_approve(test_name=f"userop_clear_sign_{param.name.lower()}")
+
+    # ECDSA half, inline: [len][DER sig][v]
+    response = client.get_async_response()
+    assert response is not None
+    der_sig_len, der_sig, _v = unpack_sign_tx_response(response.data)
+    assert der_sig_len == len(der_sig) and 8 <= der_sig_len <= 72
+
+    # ML-DSA half, through the chunk INS, over the device's userOpHash.
+    pk = client.get_mldsa_pk(param)
+    sig = client.get_mldsa_sig(param)
+    assert len(pk) == param.pk_bytes
+    assert len(sig) == param.sig_bytes
+    PUBKEY_CLS[param].from_public_bytes(pk).verify(sig, _userop_hash(METADATA, PACKED))
+
+
+def test_userop_clear_sign_rejected(
+    backend: BackendInterface, scenario_navigator: NavigateWithScenario
+) -> None:
+    """Rejecting the review signs nothing and leaves no ML-DSA material."""
+    client = BoilerplateCommandSender(backend)
+
+    with pytest.raises(ExceptionRAPDU) as e:
+        with client.hybrid_sign_userop(
+            path=PATH_STR,
+            metadata=METADATA,
+            packed=PACKED,
+            call_data=CALLDATA,
+            param=MLDSAParam.MLDSA_44,
+        ):
+            scenario_navigator.review_reject(test_name="userop_clear_sign_rejected")
+    assert e.value.status == Errors.SWO_CONDITIONS_NOT_SATISFIED
+    assert client.get_mldsa_sig(MLDSAParam.MLDSA_44) == bytes(MLDSAParam.MLDSA_44.sig_bytes)
+
+
+def test_userop_blind_variant_refused_without_opt_in(backend: BackendInterface) -> None:
+    """Withholding callData is blind signing, so it needs the user's opt-in."""
+    _p1(backend, P1_PATH, PATH)
+    _p1(backend, P1_METADATA, METADATA)
+    _p1(backend, P1_PACKED, PACKED)
+
+    with pytest.raises(ExceptionRAPDU) as e:
+        backend.exchange(cla=CLA, ins=InsType.HYBRID_SIGN_USEROP, p1=P1_CALLDATA, p2=0, data=b"")
+    assert e.value.status == Errors.SW_BLIND_SIGNING_DISABLED

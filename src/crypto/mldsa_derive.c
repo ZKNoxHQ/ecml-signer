@@ -62,22 +62,22 @@ const char *mldsa_param_name(MLDSA_param_t param) {
 }
 
 int mldsa_derive_seed(const uint32_t *path,
-                      size_t          path_len,
-                      MLDSA_param_t   param,
-                      uint8_t         seed_out[MLDSA_DERIVE_SEED_LEN]) {
+                      size_t path_len,
+                      MLDSA_param_t param,
+                      uint8_t seed_out[MLDSA_DERIVE_SEED_LEN]) {
     if (path_len > MLDSA_DERIVE_MAX_PATH) {
         return -1;
     }
 
     const char *slip10_key;
-    size_t      slip10_key_len;
+    size_t slip10_key_len;
     switch (param) {
         case MLDSA_44:
-            slip10_key     = MLDSA44_SLIP10_KEY;
+            slip10_key = MLDSA44_SLIP10_KEY;
             slip10_key_len = sizeof(MLDSA44_SLIP10_KEY) - 1;
             break;
         case MLDSA_65:
-            slip10_key     = MLDSA65_SLIP10_KEY;
+            slip10_key = MLDSA65_SLIP10_KEY;
             slip10_key_len = sizeof(MLDSA65_SLIP10_KEY) - 1;
             break;
         default:
@@ -118,10 +118,10 @@ int mldsa_derive_seed(const uint32_t *path,
 
 int mldsa_keygen_from_seed(const uint8_t seed[MLDSA_DERIVE_SEED_LEN],
                            MLDSA_param_t param,
-                           uint8_t      *pk,
-                           size_t        pk_len,
-                           uint8_t      *sk,
-                           size_t        sk_len) {
+                           uint8_t *pk,
+                           size_t pk_len,
+                           uint8_t *sk,
+                           size_t sk_len) {
     if (pk_len < mldsa_pk_bytes(param) || sk_len < mldsa_sk_bytes(param)) {
         return -1;
     }

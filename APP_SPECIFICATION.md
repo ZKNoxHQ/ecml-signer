@@ -20,6 +20,62 @@ The application interface can be accessed over HID or BLE
 
 ## APDUs
 
+### INSTRUCTION INDEX
+
+Every instruction the dispatcher accepts, with `CLA = 0xE0`. This table is the
+authoritative list; it must stay in step with `InsType` in `src/types.h`.
+
+| INS | Name | Purpose | Availability |
+|---|---|---|---|
+| `0x03` | `GET_VERSION` | application version | always |
+| `0x04` | `GET_APP_NAME` | application name | always |
+| `0x05` | `GET_PUBLIC_KEY` | secp256k1 public key of a BIP32 path | always |
+| `0x06` | `SIGN_TX` | sign a serialized transaction | always |
+| `0x07` | `SIGN_TOKEN_TX` | sign a token transfer | always |
+| `0x08` | `SIGN_TX_MLDSA` | sign a transaction with an ML-DSA key | always (not Nano X, see below) |
+| `0x0A` | `DUMMY` | echo `cdata`, I/O smoke test | **test builds only** |
+| `0x0B` | `SAMPLE_IN_BALL` | raw ML-DSA SampleInBall over host input | **test builds only** |
+| `0x0C` | `KEYGEN_DILITHIUM_CORE` | ML-DSA keygen from a host-supplied seed | **test builds only** |
+| `0x0D` | `SET_SETTING` | write an NVM setting (P1 = id, P2 = value) | **test builds only** |
+| `0x0F` | `SIGN_DILITHIUM` | ML-DSA sign of a loaded payload (3-step) | blind signing |
+| `0x11` | `KEYGEN_DILITHIUM` | ML-DSA keygen from a BIP32 path | always |
+| `0x12` | `GET_SIG_CHUNK` | fetch a slice of the stored signature | always |
+| `0x13` | `GET_PK_CHUNK` | fetch a slice of the stored public key | always |
+| `0x15` | `ECDSA_SIGN_HASH` | sign a bare 32-byte hash with secp256k1 | blind signing |
+| `0x16` | `HYBRID_SIGN_HASH` | sign a hash with ECDSA **and** ML-DSA | blind signing |
+| `0x17` | `HYBRID_SIGN_USEROP` | hybrid clear-sign of an ERC-4337 v0.7 UserOp | always (blind signing if `callData` withheld) |
+| `0x22` | `PROVIDE_TOKEN_INFO` | provide dynamic token info (CAL TLV) | always |
+
+Any other INS returns `SWO_INVALID_INS`.
+
+#### Test-only instructions
+
+`0x0A`, `0x0B`, `0x0C` and `0x0D` are compiled in only when the app is built with
+`DEBUG=1` or `TEST_INS=1` (`HAVE_TEST_INS`). On a production build they are
+absent from the binary and answer `SWO_INVALID_INS` like any unknown INS.
+`0x0C` is the reason for the gate: it runs key generation from a seed chosen by
+the host, which must never be reachable on a device holding real funds. The
+`tests/standalone` suite needs these instructions (NIST ACVP vectors, primitive
+determinism, and `SET_SETTING` to reach a known settings state), so it requires
+a `TEST_INS=1` build.
+
+`SET_SETTING` takes `P1` = setting id (`0x00` = blind signing), `P2` = value
+(`0x00` off, `0x01` on) and no data; anything else is `SWO_INCORRECT_P1_P2` or
+`SWO_WRONG_DATA_LENGTH`. It deliberately bypasses the Settings UI, whose own
+path is covered by `tests/standalone/test_blind_signing.py`.
+
+#### Blind signing
+
+Instructions marked *blind signing* sign bytes whose meaning the review screen
+cannot represent: a bare 32-byte digest (`0x15`, `0x16`), an opaque payload
+shown only as a hex preview (`0x0F`), or a UserOp whose `callData` preimage was
+withheld (`0x17` with `Lc = 0` on the `P1 = 0x03` step). They are refused with
+`SW_BLIND_SIGNING_DISABLED` (`0xB00A`) unless the user has turned **Blind
+signing** on in the app Settings. The setting is stored in NVM
+(`internal_storage_t.blind_signing_allowed`), defaults to **off** on a fresh
+install, and enabling it requires confirming a warning screen. The device never
+downgrades a clear-signed review to a blind one on its own.
+
 ### ML-DSA PARAMETER SET (P2)
 
 Every ML-DSA instruction takes the parameter set in **P2**:
@@ -356,7 +412,6 @@ The dynamic token information is stored in RAM only (not in NVM) and persists ac
 - Persists across `SIGN_TOKEN_TX` (token transactions)
 - Persists across `GET_PUBLIC_KEY` and other read-only commands
 - Cleared when app exits to dashboard
-- Cleared after every transaction in SWAP context
 - Overwritten when new `PROVIDE_TOKEN_INFO` command received (only one slot is handled)
 
 #### Coding

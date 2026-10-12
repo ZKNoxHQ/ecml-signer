@@ -8,6 +8,7 @@
  *
  * P1/P2 accept any value.
  */
+#ifdef HAVE_TEST_INS
 int handler_cmd_dummy(buffer_t *cdata);
 
 /**
@@ -28,3 +29,4 @@ int handler_cmd_dummy(buffer_t *cdata);
  * P1 accepts any value; P2 other than 0x00 / 0x01 is SWO_INCORRECT_P1_P2.
  */
 int handler_cmd_sample_in_ball(buffer_t *cdata, MLDSA_param_t param);
+#endif  // HAVE_TEST_INS

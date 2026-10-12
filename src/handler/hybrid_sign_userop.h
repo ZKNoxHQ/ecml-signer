@@ -57,4 +57,4 @@ const uint8_t *userop_get_sender(void);
 const uint8_t *userop_get_chain_id(void);
 const uint8_t *userop_get_call_to(void);
 const uint8_t *userop_get_call_value(void);
-bool           userop_has_call_info(void);
+bool userop_has_call_info(void);

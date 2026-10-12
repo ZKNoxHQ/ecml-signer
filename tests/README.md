@@ -1,9 +1,7 @@
 The `application_client` directory contains the minimalist python client for crafting and sending APDUs to the application.
-It is extracted in order to be able to be used in both tests setup.
 
-The `standalone` directory contains the standalone tests of the application,
-when it is started from the Dashboard of the device (main use case).
+The `standalone` directory contains the functional tests of the application, started from the Dashboard of the
+device. They require a build made with `TEST_INS=1` (or `DEBUG=1`), which exposes the test-only instructions they
+use; see "Test-only instructions" in `APP_SPECIFICATION.md`.
 
-The `swap` directory contains the tests of the **SWAP** feature of the application,
-when it is started by the Exchange application through the `os_lib_call` API.
-This setup needs the Exchange and Ethereum binaries compiled.
+The application does not support the Exchange/swap flow, so there is no swap test suite.

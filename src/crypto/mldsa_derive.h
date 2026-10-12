@@ -43,9 +43,9 @@
 bool mldsa_param_from_p2(uint8_t p2_param, MLDSA_param_t *param);
 
 /** Sizes and constants of a parameter set (from the SDK's MLDSA_PARAM table). */
-size_t  mldsa_pk_bytes(MLDSA_param_t param);
-size_t  mldsa_sk_bytes(MLDSA_param_t param);
-size_t  mldsa_sig_bytes(MLDSA_param_t param);
+size_t mldsa_pk_bytes(MLDSA_param_t param);
+size_t mldsa_sk_bytes(MLDSA_param_t param);
+size_t mldsa_sig_bytes(MLDSA_param_t param);
 uint8_t mldsa_tau(MLDSA_param_t param);
 
 /** "ML-DSA-44" / "ML-DSA-65", for the review screens. */
@@ -70,9 +70,9 @@ const char *mldsa_param_name(MLDSA_param_t param);
  * @return 0 on success, negative on SDK error.
  */
 int mldsa_derive_seed(const uint32_t *path,
-                      size_t          path_len,
-                      MLDSA_param_t   param,
-                      uint8_t         seed_out[MLDSA_DERIVE_SEED_LEN]);
+                      size_t path_len,
+                      MLDSA_param_t param,
+                      uint8_t seed_out[MLDSA_DERIVE_SEED_LEN]);
 
 /**
  * Deterministic ML-DSA keygen from a 32-byte seed (FIPS 204 Alg. 6 with ξ = seed).
@@ -85,7 +85,7 @@ int mldsa_derive_seed(const uint32_t *path,
  */
 int mldsa_keygen_from_seed(const uint8_t seed[MLDSA_DERIVE_SEED_LEN],
                            MLDSA_param_t param,
-                           uint8_t      *pk,
-                           size_t        pk_len,
-                           uint8_t      *sk,
-                           size_t        sk_len);
+                           uint8_t *pk,
+                           size_t pk_len,
+                           uint8_t *sk,
+                           size_t sk_len);

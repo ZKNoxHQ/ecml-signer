@@ -2,7 +2,7 @@
 
 #include "buffer.h"
 
-#include "types.h"
+#include "tx_types.h"
 
 /**
  * Deserialize raw transaction in structure.

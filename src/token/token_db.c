@@ -38,7 +38,6 @@ typedef struct token_entry_s {
  * THIRD-PARTY DEVELOPERS: You can freely modify this database for your tokens.
  * No Ledger coordination required - just add your token entries and rebuild.
  *
- * For SWAP support with these tokens, submit them to Ledger's CAL database (quick/easy).
  * For runtime-updated tokens, see PROVIDE_TOKEN_INFO handler (requires PKI coordination).
  */
 static const token_entry_t TOKENS[] = {

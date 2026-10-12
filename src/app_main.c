@@ -20,7 +20,6 @@
 
 #include "os.h"
 #include "ux.h"
-#include "swap.h"
 
 #include "types.h"
 #include "globals.h"
@@ -49,14 +48,7 @@ void app_main() {
     // DEBUG_STACK_WATERMARK=1 builds only: paint the free stack (see src/debug).
     stack_watermark_init();
 
-#ifdef HAVE_SWAP
-    // When called in swap context as a library, we don't want to show the menu
-    if (!G_called_from_swap) {
-#endif
-        ui_menu_main();
-#ifdef HAVE_SWAP
-    }
-#endif
+    ui_menu_main();
 
     // Reset context
     explicit_bzero(&G_context, sizeof(G_context));
@@ -66,8 +58,8 @@ void app_main() {
     // Initialize the NVM data if required
     if (N_storage.initialized != 0x01) {
         internal_storage_t storage;
-        storage.dummy1_allowed = 0x00;
-        storage.dummy2_allowed = 0x00;
+        // Blind signing is opt-in: default OFF on a fresh install.
+        storage.blind_signing_allowed = 0x00;
         storage.initialized = 0x01;
         nvm_write((void *) &N_storage, &storage, sizeof(internal_storage_t));
     }

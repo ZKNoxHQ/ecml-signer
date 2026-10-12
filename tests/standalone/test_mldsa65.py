@@ -160,6 +160,7 @@ def test_bip32_keygen_65_deterministic_and_separated(backend: BackendInterface) 
     assert pk44[:32] != pk1[:32], "rho must differ between the two parameter sets"
 
 
+@pytest.mark.usefixtures("blind_signing_enabled")
 def test_invalid_parameter_selector_rejected(backend: BackendInterface) -> None:
     for ins, data in (
         (InsType.KEYGEN_DILITHIUM_CORE, bytes(32)),
@@ -262,6 +263,7 @@ def test_sign_tx_mldsa(
 
 
 @pytest.mark.parametrize("param", [MLDSAParam.MLDSA_44, MLDSAParam.MLDSA_65], ids=lambda p: p.name)
+@pytest.mark.usefixtures("blind_signing_enabled")
 def test_hybrid_sign_hash(
     backend: BackendInterface, scenario_navigator: NavigateWithScenario, param: MLDSAParam
 ) -> None:
@@ -312,6 +314,7 @@ def test_sign_tx_mldsa_unavailable_on_nanox(backend: BackendInterface) -> None:
         assert e.value.status == Errors.SWO_INVALID_INS
 
 
+@pytest.mark.usefixtures("blind_signing_enabled")
 def test_hybrid_sign_hash_65_rejected(
     backend: BackendInterface, scenario_navigator: NavigateWithScenario
 ) -> None:

@@ -39,6 +39,7 @@
 #include "ecdsa_sign_hash.h"
 #include "hybrid_sign_hash.h"
 #include "hybrid_sign_userop.h"
+#include "test_settings.h"
 #include "mldsa_derive.h"
 
 int apdu_dispatcher(const command_t *cmd) {
@@ -92,7 +93,7 @@ int apdu_dispatcher(const command_t *cmd) {
             // (P2 = more-flag | param: 0x80 / 0x00 for ML-DSA-44 as before, 0x81 / 0x01
             // for ML-DSA-65); SIGN_TX / SIGN_TOKEN_TX keep P2 in {0x00, 0x80}.
             PRINTF("APDU_DISPATCHER: %d\n", cmd->ins);
-            uint8_t p2_more  = cmd->p2 & P2_MORE;
+            uint8_t p2_more = cmd->p2 & P2_MORE;
             uint8_t p2_param = cmd->p2 & MLDSA_P2_PARAM_MASK;
             if (cmd->ins == SIGN_TX_MLDSA) {
                 if (!mldsa_param_from_p2(p2_param, &mldsa_param)) {
@@ -152,6 +153,9 @@ int apdu_dispatcher(const command_t *cmd) {
 
             return handler_provide_token_info(&buf);
 
+#ifdef HAVE_TEST_INS
+        // Test-only INS: absent from production builds (see HAVE_TEST_INS in the
+        // Makefile). An unknown INS falls through to SWO_INVALID_INS below.
         case DUMMY:
             if (!cmd->data) {
                 return io_send_sw(SWO_WRONG_DATA_LENGTH);
@@ -194,6 +198,15 @@ int apdu_dispatcher(const command_t *cmd) {
 
             return handler_cmd_keygen_core_dilithium(&buf, mldsa_param);
 
+        case SET_SETTING:
+            // Takes everything in P1/P2; no data expected.
+            if (cmd->lc != 0) {
+                return io_send_sw(SWO_WRONG_DATA_LENGTH);
+            }
+
+            return handler_set_setting(cmd->p1, cmd->p2);
+#endif  // HAVE_TEST_INS
+
         case KEYGEN_DILITHIUM:
             if (cmd->p1 != 0 || !mldsa_param_from_p2(cmd->p2, &mldsa_param)) {
                 return io_send_sw(SWO_INCORRECT_P1_P2);
@@ -226,6 +239,12 @@ int apdu_dispatcher(const command_t *cmd) {
             return handler_cmd_get_sig_chunk(&buf, cmd->p1, cmd->p2);
 
         case SIGN_DILITHIUM:
+            // Signs an opaque host-supplied payload: the review screen can only
+            // show a hex preview, never the meaning of the bytes. Blind signing.
+            if (!BLIND_SIGNING_ALLOWED()) {
+                return io_send_sw(SW_BLIND_SIGNING_DISABLED);
+            }
+
             // P1 encodes the state machine step (0=init, 1=absorb, 128=finalize).
             // The handler validates P1; dispatcher just passes it through.
             if (cmd->p2 != 0) {
@@ -239,6 +258,12 @@ int apdu_dispatcher(const command_t *cmd) {
             return handler_cmd_sign_dilithium(&buf, cmd->p1);
 
         case ECDSA_SIGN_HASH:
+            // Signs a bare 32-byte digest: nothing about the preimage can be
+            // shown to the user. Blind signing by construction.
+            if (!BLIND_SIGNING_ALLOWED()) {
+                return io_send_sw(SW_BLIND_SIGNING_DISABLED);
+            }
+
             if (cmd->p1 != 0 || cmd->p2 != 0) {
                 return io_send_sw(SWO_INCORRECT_P1_P2);
             }
@@ -254,6 +279,13 @@ int apdu_dispatcher(const command_t *cmd) {
             return handler_ecdsa_sign_hash(&buf);
 
         case HYBRID_SIGN_HASH:
+            // Same bare-digest exposure as ECDSA_SIGN_HASH, over both halves.
+            // Use HYBRID_SIGN_USEROP (0x17) with callData for a clear-signed
+            // hybrid signature.
+            if (!BLIND_SIGNING_ALLOWED()) {
+                return io_send_sw(SW_BLIND_SIGNING_DISABLED);
+            }
+
             // P2 selects the ML-DSA parameter set of the hybrid signature.
             if (cmd->p1 != 0 || !mldsa_param_from_p2(cmd->p2, &mldsa_param)) {
                 return io_send_sw(SWO_INCORRECT_P1_P2);

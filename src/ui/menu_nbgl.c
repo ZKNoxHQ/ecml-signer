@@ -41,8 +41,8 @@ static const char *const INFO_TYPES[SETTING_INFO_NB] = {"Version", "Developer"};
 static const char *const INFO_CONTENTS[SETTING_INFO_NB] = {APPVERSION, "Ledger"};
 
 // settings switches definitions
-enum { DUMMY_SWITCH_1_TOKEN = FIRST_USER_TOKEN, DUMMY_SWITCH_2_TOKEN };
-enum { DUMMY_SWITCH_1_ID = 0, DUMMY_SWITCH_2_ID, SETTINGS_SWITCHES_NB };
+enum { BLIND_SIGNING_TOKEN = FIRST_USER_TOKEN };
+enum { BLIND_SIGNING_ID = 0, SETTINGS_SWITCHES_NB };
 
 static nbgl_contentSwitch_t switches[SETTINGS_SWITCHES_NB] = {0};
 
@@ -72,11 +72,12 @@ static const nbgl_genericContents_t settingContents = {.callbackCallNeeded = fal
 static void review_warning_choice(bool confirm) {
     uint8_t switch_value;
     if (confirm) {
-        // toggle the switch value
-        switch_value = !N_storage.dummy2_allowed;
-        switches[DUMMY_SWITCH_2_ID].initState = (nbgl_state_t) switch_value;
+        // Only ever reached when turning blind signing ON (turning it OFF needs
+        // no confirmation), so this always enables it.
+        switch_value = 0x01;
+        switches[BLIND_SIGNING_ID].initState = (nbgl_state_t) switch_value;
         // store the new setting value in NVM
-        nvm_write((void *) &N_storage.dummy2_allowed, &switch_value, 1);
+        nvm_write((void *) &N_storage.blind_signing_allowed, &switch_value, 1);
     }
 
     // Reset setting menu to the right page
@@ -96,32 +97,22 @@ static void controls_callback(int token, uint8_t index, int page) {
     initSettingPage = page;
 
     uint8_t switch_value;
-    if (token == DUMMY_SWITCH_1_TOKEN) {
-        // Dummy 1 switch touched
-        // toggle the switch value
-        switch_value = !N_storage.dummy1_allowed;
-        switches[DUMMY_SWITCH_1_ID].initState = (nbgl_state_t) switch_value;
-        // store the new setting value in NVM
-        nvm_write((void *) &N_storage.dummy1_allowed, &switch_value, 1);
-    } else if (token == DUMMY_SWITCH_2_TOKEN) {
-        // Dummy 2 switch touched
-
-        // in this example we display a warning when the user wants
-        // to activate the dummy 2 setting
-        if (!N_storage.dummy2_allowed) {
-            // Display the warning message and ask the user to confirm
+    if (token == BLIND_SIGNING_TOKEN) {
+        if (!N_storage.blind_signing_allowed) {
+            // Enabling is the dangerous direction: warn and require an
+            // explicit confirmation before writing it to NVM.
             nbgl_useCaseChoice(&ICON_APP_WARNING,
-                               "Dummy 2",
-                               "Are you sure to\nallow dummy 2\nin transactions?",
+                               "Blind signing",
+                               "Allow signing data\nthat cannot be\ndisplayed? Only "
+                               "enable if you\ntrust the application.",
                                "I understand, confirm",
                                "Cancel",
                                review_warning_choice);
         } else {
-            // toggle the switch value
-            switch_value = !N_storage.dummy2_allowed;
-            switches[DUMMY_SWITCH_2_ID].initState = (nbgl_state_t) switch_value;
-            // store the new setting value in NVM
-            nvm_write((void *) &N_storage.dummy2_allowed, &switch_value, 1);
+            // Disabling is always safe — no confirmation needed.
+            switch_value = 0x00;
+            switches[BLIND_SIGNING_ID].initState = (nbgl_state_t) switch_value;
+            nvm_write((void *) &N_storage.blind_signing_allowed, &switch_value, 1);
         }
     }
 }
@@ -129,20 +120,12 @@ static void controls_callback(int token, uint8_t index, int page) {
 // home page definition
 void ui_menu_main(void) {
     // Initialize switches data
-    switches[DUMMY_SWITCH_1_ID].initState = (nbgl_state_t) N_storage.dummy1_allowed;
-    switches[DUMMY_SWITCH_1_ID].text = "Dummy 1";
-    switches[DUMMY_SWITCH_1_ID].subText = "Allow dummy 1\nin transactions";
-    switches[DUMMY_SWITCH_1_ID].token = DUMMY_SWITCH_1_TOKEN;
+    switches[BLIND_SIGNING_ID].initState = (nbgl_state_t) N_storage.blind_signing_allowed;
+    switches[BLIND_SIGNING_ID].text = "Blind signing";
+    switches[BLIND_SIGNING_ID].subText = "Allow signing data\nthat cannot be displayed";
+    switches[BLIND_SIGNING_ID].token = BLIND_SIGNING_TOKEN;
 #ifdef HAVE_PIEZO_SOUND
-    switches[DUMMY_SWITCH_1_ID].tuneId = TUNE_TAP_CASUAL;
-#endif
-
-    switches[DUMMY_SWITCH_2_ID].initState = (nbgl_state_t) N_storage.dummy2_allowed;
-    switches[DUMMY_SWITCH_2_ID].text = "Dummy 2";
-    switches[DUMMY_SWITCH_2_ID].subText = "Allow dummy 2\nin transactions";
-    switches[DUMMY_SWITCH_2_ID].token = DUMMY_SWITCH_2_TOKEN;
-#ifdef HAVE_PIEZO_SOUND
-    switches[DUMMY_SWITCH_2_ID].tuneId = TUNE_TAP_CASUAL;
+    switches[BLIND_SIGNING_ID].tuneId = TUNE_TAP_CASUAL;
 #endif
 
     nbgl_useCaseHomeAndSettings(APPNAME,

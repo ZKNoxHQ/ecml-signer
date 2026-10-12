@@ -14,6 +14,10 @@ from ragger.error import ExceptionRAPDU
 
 from application_client.boilerplate_command_sender import CLA, Errors, InsType
 
+# Every instruction exercised here is blind signing (the review screen cannot
+# represent the bytes being signed), so the whole module needs the user opt-in.
+pytestmark = pytest.mark.usefixtures("blind_signing_enabled")
+
 
 def _payload(path: str, hash_bytes: bytes) -> bytes:
     if len(hash_bytes) != 32:

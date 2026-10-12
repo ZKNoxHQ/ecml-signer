@@ -25,7 +25,9 @@
  * directly. In practice, callers should prefer KEYGEN_DILITHIUM (INS 0x11)
  * which derives the seed from a BIP32 path on-device.
  */
+#ifdef HAVE_TEST_INS
 int handler_cmd_keygen_core_dilithium(buffer_t *cdata, MLDSA_param_t param);
+#endif  // HAVE_TEST_INS
 
 /**
  * KEYGEN_DILITHIUM (INS 0x11) — derive the ML-DSA keypair from a BIP32

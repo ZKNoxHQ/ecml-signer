@@ -57,9 +57,9 @@ int helper_send_response_mldsa_sig() {
     // Response layout: pk_len(2 BE) || pk || sig_len(2 BE) || sig. The lengths
     // are those of the parameter set of the flow; the four parts are sent as
     // a buffer list straight from the context (no stack copy).
-    size_t  pk_len  = mldsa_pk_bytes(G_context.tx_info.mldsa_param);
-    size_t  sig_len = G_context.tx_info.mldsa_sig_len;
-    uint8_t pk_len_be[2]  = {(uint8_t) (pk_len >> 8), (uint8_t) (pk_len & 0xFF)};
+    size_t pk_len = mldsa_pk_bytes(G_context.tx_info.mldsa_param);
+    size_t sig_len = G_context.tx_info.mldsa_sig_len;
+    uint8_t pk_len_be[2] = {(uint8_t) (pk_len >> 8), (uint8_t) (pk_len & 0xFF)};
     uint8_t sig_len_be[2] = {(uint8_t) (sig_len >> 8), (uint8_t) (sig_len & 0xFF)};
 
     if (sig_len > sizeof(G_context.tx_info.mldsa_sig)) {
