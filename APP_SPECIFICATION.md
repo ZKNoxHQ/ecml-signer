@@ -95,6 +95,13 @@ by the `P1 = 0x00` one and a later APDU disagreeing is `SWO_INCORRECT_P1_P2`),
 and `SIGN_TX_MLDSA` (0x08, in the low bits of P2 beside the `0x80` more-flag:
 `0x80`/`0x00` for ML-DSA-44 as before, `0x81`/`0x01` for ML-DSA-65).
 
+`SIGN_DILITHIUM` (0x0F) does **not** take a selector either (its P2 must be
+`0x00`): it signs with the key loaded by the last `KEYGEN_DILITHIUM` /
+`KEYGEN_DILITHIUM_CORE`, in that key's parameter set. Load an ML-DSA-65 key
+first to get an ML-DSA-65 signature. Its review screen shows the set on a
+`Signer` line (`ML-DSA-44` / `ML-DSA-65`), read from the same state the
+signature is computed with.
+
 `GET_PK_CHUNK` (0x13) and `GET_SIG_CHUNK` (0x12) do **not** take a selector:
 they follow the parameter set of the key currently loaded, and refuse any
 `(P1, P2)` slice reaching past its real size with `SWO_WRONG_DATA_LENGTH`

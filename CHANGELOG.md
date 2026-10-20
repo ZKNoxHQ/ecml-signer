@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with the setting off.
 - `SET_SETTING` (0x0D), a test-only instruction for putting the device in a
   known settings state without driving the UI.
+- The `SIGN_DILITHIUM` (0x0F) review shows which ML-DSA parameter set is about
+  to sign (`Signer: ML-DSA-44` / `ML-DSA-65`). The instruction has no selector
+  and uses the last loaded key, so the screen was the only place the user could
+  learn it. Its finalize tests now run for both sets and verify the signature
+  against the exported public key.
 
 ### Changed
 
