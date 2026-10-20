@@ -43,7 +43,7 @@ authoritative list; it must stay in step with `InsType` in `src/types.h`.
 | `0x13` | `GET_PK_CHUNK` | fetch a slice of the stored public key | always |
 | `0x15` | `ECDSA_SIGN_HASH` | sign a bare 32-byte hash with secp256k1 | blind signing |
 | `0x16` | `HYBRID_SIGN_HASH` | sign a hash with ECDSA **and** ML-DSA | blind signing |
-| `0x17` | `HYBRID_SIGN_USEROP` | hybrid clear-sign of an ERC-4337 v0.7 UserOp | always; blind signing unless the `callData` is an `execute(address,uint256,bytes)` call |
+| `0x17` | `HYBRID_SIGN_USEROP` | hybrid clear-sign of an ERC-4337 v0.7 UserOp | always for a native or ERC-20 transfer; otherwise blind signing (see below) |
 | `0x22` | `PROVIDE_TOKEN_INFO` | provide dynamic token info (CAL TLV) | always |
 
 Any other INS returns `SWO_INVALID_INS`.
@@ -68,15 +68,31 @@ path is covered by `tests/standalone/test_blind_signing.py`.
 
 Instructions marked *blind signing* sign bytes whose meaning the review screen
 cannot represent: a bare 32-byte digest (`0x15`, `0x16`), an opaque payload
-shown only as a hex preview (`0x0F`), or a UserOp the device cannot clear-sign (`0x17` whose `callData` is withheld —
-`Lc = 0` on the `P1 = 0x03` step — or is anything but an
-`execute(address,uint256,bytes)` call, e.g. `executeBatch`; only `execute` yields
-the To / Value lines, everything else shows just the userOpHash). They are refused with
+shown only as a hex preview (`0x0F`), or a UserOp the device cannot
+clear-sign (`0x17`, see below). They are refused with
 `SW_BLIND_SIGNING_DISABLED` (`0xB00A`) unless the user has turned **Blind
 signing** on in the app Settings. The setting is stored in NVM
 (`internal_storage_t.blind_signing_allowed`), defaults to **off** on a fresh
 install, and enabling it requires confirming a warning screen. The device never
 downgrades a clear-signed review to a blind one on its own.
+
+`HYBRID_SIGN_USEROP` clear-signs exactly two shapes of `callData`, both a
+canonically ABI-encoded `execute(address dest, uint256 value, bytes data)`
+(selector `0xb61d27f6`, `data` offset `0x60`, zero address and padding bytes,
+nothing trailing):
+
+| Inner `data` | Shown as |
+|---|---|
+| empty | native transfer: **To** = `dest`, **Value (wei)** = `value` |
+| `transfer(address to, uint256 amount)` (selector `0xa9059cbb`, exactly 68 bytes), with `value == 0` | ERC-20 transfer: **Token** = `dest`, **To** = `to`, **Amount (base units)** = `amount` |
+
+Everything else is blind signing: `callData` withheld (`Lc = 0` on `P1 = 0x03`),
+another outer call (`executeBatch`, ...), any other inner call (`approve`, a
+swap, ...), a transfer that also sends native value, or a non-canonical
+encoding. Its review shows only the userOpHash. The device has no token
+metadata for these chains, so ERC-20 amounts are shown in base units next to
+the token contract, never with a guessed ticker or decimals. Amounts, values
+and the chain ID are shown in full as decimal integers.
 
 ### ML-DSA PARAMETER SET (P2)
 

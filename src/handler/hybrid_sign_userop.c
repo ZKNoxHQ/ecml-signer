@@ -15,13 +15,32 @@
 #include "globals.h"
 #include "sw.h"
 
-// execute(address,uint256,bytes) function selector (Keccak-256 of the signature,
-// first 4 bytes) = 0xb61d27f6.
-#define EXECUTE_SELECTOR_0 0xb6
-#define EXECUTE_SELECTOR_1 0x1d
-#define EXECUTE_SELECTOR_2 0x27
-#define EXECUTE_SELECTOR_3 0xf6
-#define EXECUTE_MIN_LEN    68  // 4-byte selector + 32-byte dest word + 32-byte value word
+// ABI layout of the outer call, execute(address dest, uint256 value, bytes data)
+// (selector 0xb61d27f6), canonically encoded:
+//   [  0..  4) selector
+//   [  4.. 36) dest   (address, left-padded with 12 zero bytes)
+//   [ 36.. 68) value
+//   [ 68..100) offset of `data` = 0x60, the only canonical value
+//   [100..132) length L of `data`
+//   [132..132 + ceil32(L)) data, zero-padded to a 32-byte boundary
+#define ABI_WORD            32
+#define ABI_SELECTOR_LEN    4
+#define ABI_ADDRESS_PAD     12  // zero bytes before a 20-byte address in its word
+#define EXEC_DEST_OFF       4
+#define EXEC_VALUE_OFF      36
+#define EXEC_DATA_PTR_OFF   68
+#define EXEC_DATA_LEN_OFF   100
+#define EXEC_DATA_OFF       132
+#define EXEC_DATA_PTR_CANON 0x60
+
+// Inner call recognised for clear signing: ERC-20 transfer(address to,
+// uint256 amount) (selector 0xa9059cbb), exactly selector + 2 words.
+#define ERC20_TO_OFF       4
+#define ERC20_AMOUNT_OFF   36
+#define ERC20_TRANSFER_LEN 68
+
+static const uint8_t EXECUTE_SELECTOR[ABI_SELECTOR_LEN] = {0xb6, 0x1d, 0x27, 0xf6};
+static const uint8_t ERC20_TRANSFER_SELECTOR[ABI_SELECTOR_LEN] = {0xa9, 0x05, 0x9c, 0xbb};
 
 #define P1_USEROP_PATH          0x00
 #define P1_USEROP_METADATA      0x01
@@ -43,9 +62,12 @@ typedef struct {
     uint8_t gas_fees[32];
     uint8_t hash_paymaster_and_data[32];
 
-    uint8_t call_to[20];
-    uint8_t call_value[32];
-    bool has_call_info;
+    // What the device could decode, i.e. what it can clear-sign. NONE means
+    // blind signing: only the userOpHash can be shown.
+    userop_call_kind_t call_kind;
+    uint8_t call_to[20];     // NATIVE: destination. ERC20: token recipient.
+    uint8_t call_value[32];  // NATIVE: wei. ERC20: token amount (base units).
+    uint8_t call_token[20];  // ERC20: token contract.
 
     MLDSA_param_t param;  // ML-DSA parameter set fixed by the P1 = 0x00 APDU
     uint8_t step;         // tracks which P1 we expect next
@@ -111,12 +133,83 @@ static int compute_userop_hash(void) {
     return 0;
 }
 
-// Verify keccak256(callData) matches hashCallData, and try to parse
-// execute(address,uint256,bytes) to populate call_to/call_value for
-// clear-signing. len == 0 means the host chose to skip callData verification;
-// UI will fall back to showing the userOpHash.
+static bool all_zero(const uint8_t *buf, size_t len) {
+    uint8_t acc = 0;
+    for (size_t i = 0; i < len; i++) {
+        acc |= buf[i];
+    }
+    return acc == 0;
+}
+
+// A 32-byte ABI word holding a small integer: fails unless the value fits in
+// 16 bits, which bounds every length/offset below and keeps the arithmetic
+// overflow-free.
+static bool abi_word_to_u16(const uint8_t word[ABI_WORD], uint16_t *out) {
+    if (!all_zero(word, ABI_WORD - 2)) {
+        return false;
+    }
+    *out = (uint16_t) ((word[ABI_WORD - 2] << 8) | word[ABI_WORD - 1]);
+    return true;
+}
+
+// Decode a hash-verified callData into what the review can show. Strict on
+// purpose: anything that is not exactly one of the two recognised shapes, in
+// canonical ABI encoding, is USEROP_CALL_NONE (blind signing). Accepting a
+// non-canonical encoding would let the screen show one reading of bytes that
+// a contract may decode differently.
+static userop_call_kind_t decode_calldata(const uint8_t *data, uint16_t len) {
+    uint16_t ptr, inner_len;
+
+    if (len < EXEC_DATA_OFF || memcmp(data, EXECUTE_SELECTOR, ABI_SELECTOR_LEN) != 0) {
+        return USEROP_CALL_NONE;
+    }
+    if (!all_zero(data + EXEC_DEST_OFF, ABI_ADDRESS_PAD)) {
+        return USEROP_CALL_NONE;  // dirty address padding
+    }
+    if (!abi_word_to_u16(data + EXEC_DATA_PTR_OFF, &ptr) || ptr != EXEC_DATA_PTR_CANON) {
+        return USEROP_CALL_NONE;
+    }
+    if (!abi_word_to_u16(data + EXEC_DATA_LEN_OFF, &inner_len)) {
+        return USEROP_CALL_NONE;
+    }
+    // Exactly the data plus its zero padding, nothing trailing. 32-bit math:
+    // inner_len <= 0xFFFF, so no overflow.
+    uint32_t padded = ((uint32_t) inner_len + ABI_WORD - 1) / ABI_WORD * ABI_WORD;
+    if ((uint32_t) len != EXEC_DATA_OFF + padded) {
+        return USEROP_CALL_NONE;
+    }
+    const uint8_t *inner = data + EXEC_DATA_OFF;
+    if (!all_zero(inner + inner_len, padded - inner_len)) {
+        return USEROP_CALL_NONE;  // dirty padding
+    }
+
+    if (inner_len == 0) {
+        // Plain native transfer (or a call to a receive/fallback with no data).
+        memmove(userop_ctx.call_to, data + EXEC_DEST_OFF + ABI_ADDRESS_PAD, 20);
+        memmove(userop_ctx.call_value, data + EXEC_VALUE_OFF, ABI_WORD);
+        return USEROP_CALL_NATIVE;
+    }
+
+    if (inner_len == ERC20_TRANSFER_LEN &&
+        memcmp(inner, ERC20_TRANSFER_SELECTOR, ABI_SELECTOR_LEN) == 0 &&
+        all_zero(inner + ERC20_TO_OFF, ABI_ADDRESS_PAD) &&
+        // A token transfer that also sends native value is not a shape we can
+        // show honestly on one screen: refuse to clear-sign it.
+        all_zero(data + EXEC_VALUE_OFF, ABI_WORD)) {
+        memmove(userop_ctx.call_token, data + EXEC_DEST_OFF + ABI_ADDRESS_PAD, 20);
+        memmove(userop_ctx.call_to, inner + ERC20_TO_OFF + ABI_ADDRESS_PAD, 20);
+        memmove(userop_ctx.call_value, inner + ERC20_AMOUNT_OFF, ABI_WORD);
+        return USEROP_CALL_ERC20;
+    }
+
+    return USEROP_CALL_NONE;  // any other inner call: approve, swap, ...
+}
+
+// Verify keccak256(callData) matches hashCallData, then decode it for clear
+// signing. len == 0 means the host withheld callData: nothing is verified and
+// nothing can be shown (USEROP_CALL_NONE).
 static int process_calldata(const uint8_t *data, uint16_t len) {
-    userop_ctx.has_call_info = false;
+    userop_ctx.call_kind = USEROP_CALL_NONE;
 
     if (len == 0) {
         return 0;
@@ -124,33 +217,25 @@ static int process_calldata(const uint8_t *data, uint16_t len) {
 
     cx_sha3_t kctx;
     uint8_t computed[32] = {0};
+    int rc = -1;
 
-    if (cx_keccak_init_no_throw(&kctx, 256) != CX_OK) return -1;
+    if (cx_keccak_init_no_throw(&kctx, 256) != CX_OK) goto end;
     if (cx_hash_no_throw((cx_hash_t *) &kctx, CX_LAST, data, len, computed, sizeof(computed)) !=
         CX_OK) {
-        explicit_bzero(computed, sizeof(computed));
-        return -1;
+        goto end;
     }
-
     if (memcmp(computed, userop_ctx.hash_call_data, 32) != 0) {
         PRINTF("handler_hybrid_sign_userop: callData hash mismatch\n");
-        explicit_bzero(computed, sizeof(computed));
-        return -1;
+        goto end;
     }
 
-    // Try to parse execute(address dest, uint256 value, bytes data).
-    if (len >= EXECUTE_MIN_LEN && data[0] == EXECUTE_SELECTOR_0 && data[1] == EXECUTE_SELECTOR_1 &&
-        data[2] == EXECUTE_SELECTOR_2 && data[3] == EXECUTE_SELECTOR_3) {
-        // dest is right-aligned in a 32-byte ABI word starting at offset 4.
-        memmove(userop_ctx.call_to, data + 4 + 12, 20);
-        // value is a full 32-byte word at offset 36.
-        memmove(userop_ctx.call_value, data + 4 + 32, 32);
-        userop_ctx.has_call_info = true;
-    }
+    userop_ctx.call_kind = decode_calldata(data, len);
+    rc = 0;
 
+end:
     explicit_bzero(computed, sizeof(computed));
     explicit_bzero(&kctx, sizeof(kctx));
-    return 0;
+    return rc;
 }
 
 // ---------------------------------------------------------------------------
@@ -245,14 +330,14 @@ int handler_hybrid_sign_userop(buffer_t *cdata, uint8_t p1, MLDSA_param_t param)
                 return io_send_sw(SWO_INCORRECT_DATA);
             }
 
-            // Clear signing needs something to show: To/Value parsed from an
-            // execute(address,uint256,bytes) callData. Without it (callData
-            // withheld, or any other call such as executeBatch) the review falls
-            // back to the bare userOpHash, which is blind signing. Refuse unless
-            // the user has opted in, and wipe the accumulated UserOp. This is
-            // the same condition the review screen branches on
-            // (userop_has_call_info), so the gate and the screen cannot disagree.
-            if (!userop_ctx.has_call_info && !BLIND_SIGNING_ALLOWED()) {
+            // Clear signing needs something decoded to show (see
+            // decode_calldata: a native transfer or an ERC-20 transfer). Without
+            // it the review falls back to the bare userOpHash, which is blind
+            // signing. Refuse unless the user has opted in, and wipe the
+            // accumulated UserOp. This is the same condition the review screen
+            // branches on (userop_get_call_kind), so the gate and the screen
+            // cannot disagree.
+            if (userop_ctx.call_kind == USEROP_CALL_NONE && !BLIND_SIGNING_ALLOWED()) {
                 explicit_bzero(&userop_ctx, sizeof(userop_ctx));
                 return io_send_sw(SW_BLIND_SIGNING_DISABLED);
             }
@@ -291,6 +376,9 @@ const uint8_t *userop_get_call_to(void) {
 const uint8_t *userop_get_call_value(void) {
     return userop_ctx.call_value;
 }
-bool userop_has_call_info(void) {
-    return userop_ctx.has_call_info;
+userop_call_kind_t userop_get_call_kind(void) {
+    return userop_ctx.call_kind;
+}
+const uint8_t *userop_get_call_token(void) {
+    return userop_ctx.call_token;
 }

@@ -16,7 +16,13 @@
 //   node userop.js                                  # demo UserOp, ML-DSA-44
 //   node userop.js --mldsa 65 --out userop.json     # then: node verify.js userop.json
 //   node userop.js --to 0x2222... --value 1000000000000000000
+//   node userop.js --token 0x4444... --to 0x3333... --amount 1000000   # ERC-20 transfer
 //   node userop.js --blind                          # send no callData (hash-only review)
+//
+// The device clear-signs exactly two shapes: a native transfer (To / Value)
+// and an ERC-20 transfer (Token / To / Amount). Anything else, including
+// --data with another inner call, is blind signing and is refused unless the
+// user enabled "Blind signing" in the app Settings.
 //   node userop.js --mldsa 65 --speculos            # against a Speculos emulator
 
 import { writeFileSync } from "node:fs";
@@ -46,6 +52,12 @@ function address(a) {
 }
 
 const padWord = (addr20) => concat(Buffer.alloc(12), addr20);
+
+// ERC-20 transfer(address to, uint256 amount) inner call.
+const ERC20_TRANSFER_SELECTOR = "a9059cbb";
+function encodeErc20Transfer(to, amount) {
+  return concat(Buffer.from(ERC20_TRANSFER_SELECTOR, "hex"), padWord(to), word(amount));
+}
 
 // execute(dest, value, data) calldata. `data` is the inner bytes payload.
 function encodeExecute(dest, value, data) {
@@ -78,7 +90,9 @@ async function main() {
     nonce: "42",
     to: "0x2222222222222222222222222222222222222222",
     value: "1000000000", // wei
-    data: "", // inner payload of execute()
+    data: "", // inner payload of execute() (anything but a transfer is blind)
+    token: "", // ERC-20 contract: send `--amount` of it to `--to`
+    amount: "0", // ERC-20 amount, in base units
     blind: false, // send an empty callData step
   });
   const p = args.param;
@@ -88,11 +102,15 @@ async function main() {
   const sender = address(args.sender);
   const nonce = word(args.nonce);
 
-  const callData = encodeExecute(
-    address(args.to),
-    args.value,
-    args.data ? Buffer.from(hexToBytes(args.data)) : Buffer.alloc(0),
-  );
+  if (args.token && args.data) throw new Error("--token and --data are exclusive");
+  // ERC-20: execute(token, 0, transfer(to, amount)); native: execute(to, value, data).
+  const callData = args.token
+    ? encodeExecute(address(args.token), 0, encodeErc20Transfer(address(args.to), args.amount))
+    : encodeExecute(
+        address(args.to),
+        args.value,
+        args.data ? Buffer.from(hexToBytes(args.data)) : Buffer.alloc(0),
+      );
 
   // The callData step is a single APDU, so the payload must fit in one lc.
   if (callData.length > 255) {
@@ -120,9 +138,14 @@ async function main() {
   console.error(`Sender  : 0x${hex(sender)}`);
   if (args.blind) {
     console.error("CallData: (withheld — device reviews the userOpHash only)");
+  } else if (args.token) {
+    console.error(`Token   : ${args.token}`);
+    console.error(`To      : ${args.to}`);
+    console.error(`Amount  : ${BigInt(args.amount)} (base units)`);
   } else {
     console.error(`To      : ${args.to}`);
     console.error(`Value   : ${BigInt(args.value)} wei`);
+    if (args.data) console.error("Data    : custom inner call -> blind signing (opt-in needed)");
   }
   console.error(`UserOpHash: ${hex(userOpHash)}`);
   console.error("Approve the UserOp on your Ledger...");
@@ -152,7 +175,7 @@ async function main() {
       sender: `0x${hex(sender)}`,
       nonce: String(BigInt(args.nonce)),
       call_data_hex: hex(callData),
-      clear_signed: !args.blind,
+      clear_signed: !args.blind && !args.data,
     },
     ecdsa_der_hex: hex(result.ecdsa.der),
     ecdsa_v: result.ecdsa.v,

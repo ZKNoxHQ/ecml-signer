@@ -4,7 +4,7 @@
     },
     "ledgerDevTools.appSettings": {
         "selectedUseCase": "release",
-        "selectedDevice": "Nano S Plus",
+        "selectedDevice": "Flex",
         "selectedVariant": "BOL",
         "testsList": [
             "test_app_mainmenu",
@@ -39,6 +39,8 @@
             "test_userop_clear_sign_end_to_end",
             "test_userop_clear_sign_rejected",
             "test_userop_blind_variant_refused_without_opt_in",
+            "test_userop_unparsed_calldata_refused_without_opt_in",
+            "test_userop_unparsed_calldata_blind_signed_with_opt_in",
             "test_keygen_matches_nist_acvp",
             "test_pk_size_follows_parameter_set",
             "test_chunk_bounds_follow_parameter_set",
@@ -81,8 +83,8 @@
             "test_unknown_p1_rejected",
             "test_keygen_resets_pq_sign_state",
             "test_sign_dilithium_short_payload",
-            "test_sign_dilithium_rejected_by_user",
             "test_sign_dilithium_long_payload",
+            "test_sign_dilithium_rejected_by_user",
             "test_get_public_key_no_confirm",
             "test_get_public_key_confirm_accepted",
             "test_get_public_key_confirm_refused",

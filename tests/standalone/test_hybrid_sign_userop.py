@@ -356,9 +356,79 @@ EXECUTE_BATCH_CALLDATA = (
 # mistaken for something clear-signable.
 EXECUTE_TRUNCATED_CALLDATA = CALLDATA[:40]
 
+ERC20_TRANSFER_SELECTOR = bytes.fromhex("a9059cbb")
+ERC20_APPROVE_SELECTOR = bytes.fromhex("095ea7b3")
+TOKEN = bytes.fromhex("4444444444444444444444444444444444444444")
+RECIPIENT = bytes.fromhex("3333333333333333333333333333333333333333")
+ATTACKER = bytes.fromhex("6666666666666666666666666666666666666666")
+# 100 tokens with 18 decimals: above 2^64, so it exercises the full-width
+# uint256 decimal formatting of the review.
+AMOUNT = 100 * 10**18
+UINT256_MAX = 2**256 - 1
+
+
+def _word(value: int) -> bytes:
+    return value.to_bytes(32, "big")
+
+
+def _address_word(address: bytes, pad: bytes = bytes(12)) -> bytes:
+    return pad + address
+
+
+def _execute(
+    dest: bytes,
+    value: int,
+    inner: bytes,
+    data_ptr: int = 0x60,
+    dest_pad: bytes = bytes(12),
+    trailing: bytes = b"",
+) -> bytes:
+    """execute(address dest, uint256 value, bytes inner), canonically encoded
+    unless one of the knobs says otherwise."""
+    padding = bytes(-len(inner) % 32)
+    return (
+        EXEC_SELECTOR
+        + _address_word(dest, dest_pad)
+        + _word(value)
+        + _word(data_ptr)
+        + _word(len(inner))
+        + inner
+        + padding
+        + trailing
+    )
+
+
+def _erc20_transfer(to: bytes, amount: int, to_pad: bytes = bytes(12)) -> bytes:
+    return ERC20_TRANSFER_SELECTOR + _address_word(to, to_pad) + _word(amount)
+
+
+ERC20_TRANSFER_CALLDATA = _execute(TOKEN, 0, _erc20_transfer(RECIPIENT, AMOUNT))
+
 UNPARSED_CALLDATA = [
     pytest.param(EXECUTE_BATCH_CALLDATA, id="executeBatch"),
     pytest.param(EXECUTE_TRUNCATED_CALLDATA, id="execute-truncated"),
+    # The approval-phishing shape: execute(token, 0, approve(attacker, max)).
+    pytest.param(
+        _execute(TOKEN, 0, ERC20_APPROVE_SELECTOR + _address_word(ATTACKER) + _word(UINT256_MAX)),
+        id="inner-approve",
+    ),
+    pytest.param(
+        _execute(TOKEN, 1, _erc20_transfer(RECIPIENT, AMOUNT)), id="transfer-with-native-value"
+    ),
+    pytest.param(
+        _execute(TOKEN, 0, _erc20_transfer(RECIPIENT, AMOUNT, to_pad=b"\x01" + bytes(11))),
+        id="transfer-dirty-recipient",
+    ),
+    # transfer() with 4 extra bytes: wrong inner length, still within one APDU.
+    pytest.param(
+        _execute(TOKEN, 0, _erc20_transfer(RECIPIENT, AMOUNT) + bytes(4)),
+        id="transfer-extra-bytes",
+    ),
+    pytest.param(_execute(RECIPIENT, 1, b"", dest_pad=b"\x01" + bytes(11)), id="dirty-dest"),
+    pytest.param(_execute(RECIPIENT, 1, b"", data_ptr=0x80), id="non-canonical-offset"),
+    pytest.param(_execute(RECIPIENT, 1, b"", trailing=bytes(32)), id="trailing-bytes"),
+    # A valid ERC-20 transfer whose 28 bytes of ABI padding are not all zero.
+    pytest.param(ERC20_TRANSFER_CALLDATA[:-1] + b"\x01", id="dirty-padding"),
 ]
 
 
@@ -419,6 +489,40 @@ def test_userop_unparsed_calldata_blind_signed_with_opt_in(
         scenario_navigator.review_approve_with_warning(
             test_name=f"userop_blind_sign_{param.name.lower()}"
         )
+
+    response = client.get_async_response()
+    assert response is not None
+    der_sig_len, der_sig, _v = unpack_sign_tx_response(response.data)
+    assert der_sig_len == len(der_sig) and 8 <= der_sig_len <= 72
+
+    pk = client.get_mldsa_pk(param)
+    sig = client.get_mldsa_sig(param)
+    PUBKEY_CLS[param].from_public_bytes(pk).verify(sig, _userop_hash(METADATA, packed))
+
+
+# ---- ERC-20 transfer: clear-signed from the inner call -------------------
+
+
+@pytest.mark.parametrize(
+    "param", [MLDSAParam.MLDSA_44, MLDSAParam.MLDSA_65], ids=lambda p: p.name
+)
+def test_userop_erc20_transfer_clear_sign(
+    backend: BackendInterface, scenario_navigator: NavigateWithScenario, param: MLDSAParam
+) -> None:
+    """execute(token, 0, transfer(recipient, amount)) is clear-signed without the
+    opt-in: the review shows Token, the real recipient and the amount, not the
+    outer "To: token, Value: 0"."""
+    client = BoilerplateCommandSender(backend)
+    packed = _packed_for(ERC20_TRANSFER_CALLDATA)
+
+    with client.hybrid_sign_userop(
+        path=PATH_STR,
+        metadata=METADATA,
+        packed=packed,
+        call_data=ERC20_TRANSFER_CALLDATA,
+        param=param,
+    ):
+        scenario_navigator.review_approve(test_name=f"userop_erc20_transfer_{param.name.lower()}")
 
     response = client.get_async_response()
     assert response is not None

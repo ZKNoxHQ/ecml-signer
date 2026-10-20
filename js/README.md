@@ -59,14 +59,18 @@ Output JSON:
 
 Drives `HYBRID_SIGN_USEROP` (INS 0x17) through its four steps (path → metadata
 → packed fields → callData). The device recomputes the userOpHash, checks
-`keccak256(callData)` against the declared `hashCallData`, and reviews
-`To` / `Value` parsed out of `execute(address,uint256,bytes)`.
+`keccak256(callData)` against the declared `hashCallData`, and clear-signs two
+shapes: a native transfer (To / Value) and an ERC-20 transfer (Token / To /
+Amount, from `execute(token, 0, transfer(to, amount))`). Anything else, such as
+`--data` with another inner call or `--blind`, is blind signing: refused unless
+*Blind signing* is enabled in the app Settings.
 
 ```
 node userop.js                                     # demo UserOp, ML-DSA-44
 node userop.js --mldsa 65 --out userop.json        # then: node verify.js userop.json
 node userop.js --to 0x...dead --value 1000000000000000000
-node userop.js --chain-id 1 --sender 0x... --nonce 7 --data <hex>
+node userop.js --token 0x...usdc --to 0x...bob --amount 1000000   # ERC-20, clear-signed
+node userop.js --chain-id 1 --sender 0x... --nonce 7 --data <hex>   # blind: needs the opt-in
 node userop.js --blind                             # withhold callData: hash-only review
 ```
 

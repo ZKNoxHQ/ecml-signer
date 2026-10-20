@@ -24,15 +24,20 @@
  *              cdata = hashInitCode(32) || hashCallData(32) || accountGasLimits(32)
  *                    || preVerificationGas(32) || gasFees(32) || hashPaymasterAndData(32)
  *   P1 = 0x03  Raw callData (0..255 bytes). Triggers finalize.
- *              If len > 0: device verifies keccak256(callData) == hashCallData and
- *              tries to parse `execute(address,uint256,bytes)` (selector 0xb61d27f6)
- *              to extract `call_to` and `call_value` for clear-signing.
+ *              If len > 0: device verifies keccak256(callData) == hashCallData
+ *              (SWO_INCORRECT_DATA otherwise), then decodes it as below.
  *              If len == 0: no callData verification.
  *
- *              Only an execute(address,uint256,bytes) callData can be clear-
- *              signed (To / Value). Anything else — callData withheld, or any
- *              other call such as executeBatch — leaves nothing to show but the
- *              userOpHash, which is blind signing: it is refused with
+ *              Clear signing requires a canonically ABI-encoded
+ *              execute(address dest, uint256 value, bytes data) whose inner
+ *              `data` is one of:
+ *                - empty: a native transfer, shown as To / Value (wei);
+ *                - transfer(address to, uint256 amount) with value == 0: an
+ *                  ERC-20 transfer, shown as Token / To / Amount (base units).
+ *              Anything else — callData withheld, another outer call such as
+ *              executeBatch, any other inner call (approve, ...), or a
+ *              non-canonical encoding — leaves nothing trustworthy to show but
+ *              the userOpHash, which is blind signing: it is refused with
  *              SW_BLIND_SIGNING_DISABLED unless the user enabled blind signing
  *              in Settings, and otherwise reviewed behind the SDK blind-signing
  *              warning.
@@ -60,8 +65,19 @@ int handler_hybrid_sign_userop(buffer_t *cdata, uint8_t p1, MLDSA_param_t param)
  * accumulator that lives from the first APDU (P1=0x00) until the review
  * completes; they are wiped on rejection or fatal error mid-flow.
  */
+/** What the device could decode from the callData, i.e. what it can clear-sign. */
+typedef enum {
+    USEROP_CALL_NONE = 0,  // nothing decodable: blind signing (userOpHash only)
+    USEROP_CALL_NATIVE,    // execute(dest, value, "")           -> To, Value (wei)
+    USEROP_CALL_ERC20,     // execute(token, 0, transfer(to, n)) -> Token, To, Amount
+} userop_call_kind_t;
+
 const uint8_t *userop_get_sender(void);
 const uint8_t *userop_get_chain_id(void);
+userop_call_kind_t userop_get_call_kind(void);
+/** NATIVE: the destination. ERC20: the token recipient. */
 const uint8_t *userop_get_call_to(void);
+/** NATIVE: the value in wei. ERC20: the token amount in base units. */
 const uint8_t *userop_get_call_value(void);
-bool userop_has_call_info(void);
+/** ERC20 only: the token contract. */
+const uint8_t *userop_get_call_token(void);

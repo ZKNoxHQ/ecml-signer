@@ -15,12 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cannot represent are refused with the new status word
   `SW_BLIND_SIGNING_DISABLED` (`0xB00A`) until the user enables it:
   `ECDSA_SIGN_HASH` (0x15), `HYBRID_SIGN_HASH` (0x16), `SIGN_DILITHIUM` (0x0F),
-  and `HYBRID_SIGN_USEROP` (0x17) whenever it cannot be clear-signed: `callData`
-  withheld, or any call other than `execute(address,uint256,bytes)` (e.g.
-  `executeBatch`), whose review would show only the userOpHash. With the opt-in
-  on, that review carries the SDK blind-signing warning. A UserOp whose
-  `callData` is an `execute` call is clear-signed (To, Value) and keeps working
-  with the setting off.
+  and `HYBRID_SIGN_USEROP` (0x17) whenever it cannot be clear-signed, i.e.
+  anything but a native or ERC-20 transfer (see below), whose review would show
+  only the userOpHash. With the opt-in on, that review carries the SDK
+  blind-signing warning.
+- `HYBRID_SIGN_USEROP` clear-signs ERC-20 transfers:
+  `execute(token, 0, transfer(to, amount))` is reviewed as Token / To / Amount
+  (base units) instead of "To: token, Value: 0". Native transfers keep their
+  To / Value review. Only canonical ABI encodings of these two shapes are
+  clear-signed.
 - `SET_SETTING` (0x0D), a test-only instruction for putting the device in a
   known settings state without driving the UI.
 - The `SIGN_DILITHIUM` (0x0F) review shows which ML-DSA parameter set is about
@@ -60,6 +63,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Security:** a UserOp `execute(...)` with *any* inner call was reviewed as a
+  clear-signed "To / Value" screen that hid the call, e.g.
+  `execute(USDC, 0, approve(attacker, max))` showed "To: USDC, Value: 0" with
+  no warning. Undecodable inner calls are now blind signing (opt-in + warning).
+- The UserOp review no longer drops the Chain ID when it exceeds 64 bits, nor
+  falls back to hex for values above ~18.4 ETH: amounts, values and the chain
+  ID are shown in full as decimals, and the review refuses to display if any
+  line cannot be formatted.
 - `HYBRID_SIGN_USEROP` has end-to-end coverage for the first time (finalize,
   clear-signing review, both signature halves, user rejection), for both
   parameter sets, with the userOpHash verified against an independent
@@ -98,6 +109,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Security:** a UserOp `execute(...)` with *any* inner call was reviewed as a
+  clear-signed "To / Value" screen that hid the call, e.g.
+  `execute(USDC, 0, approve(attacker, max))` showed "To: USDC, Value: 0" with
+  no warning. Undecodable inner calls are now blind signing (opt-in + warning).
+- The UserOp review no longer drops the Chain ID when it exceeds 64 bits, nor
+  falls back to hex for values above ~18.4 ETH: amounts, values and the chain
+  ID are shown in full as decimals, and the review refuses to display if any
+  line cannot be formatted.
 - **Stack overflow on the hybrid signing path (Nano X, Stax, Flex).** The
   ML-DSA workspace runs inside the NBGL review callback, so the path peaked at
   ~18.8 KB of stack — more than those devices have (12.0 KB on Nano X and
@@ -146,6 +165,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Security:** a UserOp `execute(...)` with *any* inner call was reviewed as a
+  clear-signed "To / Value" screen that hid the call, e.g.
+  `execute(USDC, 0, approve(attacker, max))` showed "To: USDC, Value: 0" with
+  no warning. Undecodable inner calls are now blind signing (opt-in + warning).
+- The UserOp review no longer drops the Chain ID when it exceeds 64 bits, nor
+  falls back to hex for values above ~18.4 ETH: amounts, values and the chain
+  ID are shown in full as decimals, and the review refuses to display if any
+  line cannot be formatted.
 - Multiple minor lint, prototype or misspell fixes
 
 ## [1.0.1] - 2021-01-11
