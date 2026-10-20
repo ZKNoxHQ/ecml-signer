@@ -1,11 +1,45 @@
-> [!CAUTION]
-> This boilerplate must not be used to develop new applications for Ledger devices.
-> It is kept as a reference for maintaining existing C apps. For any new application,
-> use the [Rust boilerplate](https://github.com/LedgerHQ/app-boilerplate-rust) instead.
+[![Ensure compliance with Ledger guidelines](https://github.com/ZKNoxHQ/ecml-signer/actions/workflows/guidelines_enforcer.yml/badge.svg)](https://github.com/ZKNoxHQ/ecml-signer/actions/workflows/guidelines_enforcer.yml)
 
-[![Ensure compliance with Ledger guidelines](https://github.com/LedgerHQ/app-boilerplate/actions/workflows/guidelines_enforcer.yml/badge.svg)](https://github.com/LedgerHQ/app-boilerplate/actions/workflows/guidelines_enforcer.yml)
+[![Build and run functional tests using ragger through reusable workflow](https://github.com/ZKNoxHQ/ecml-signer/actions/workflows/build_and_functional_tests.yml/badge.svg?branch=master)](https://github.com/ZKNoxHQ/ecml-signer/actions/workflows/build_and_functional_tests.yml)
 
-[![Build and run functional tests using ragger through reusable workflow](https://github.com/LedgerHQ/app-boilerplate/actions/workflows/build_and_functional_tests.yml/badge.svg?branch=master)](https://github.com/LedgerHQ/app-boilerplate/actions/workflows/build_and_functional_tests.yml)
+# ECML-Signer
+
+Hybrid **ECDSA + ML-DSA** signer: one approval on the device produces a
+secp256k1 signature and a post-quantum ML-DSA signature of the same payload,
+so an account can be protected by both while the ecosystem migrates.
+
+Both NIST parameter sets of FIPS 204 are supported and selected by the host
+through **P2** on the ML-DSA instructions:
+
+| P2 | Parameter set | Security category | public key | signature |
+|----|---------------|-------------------|-----------|-----------|
+| `0x00` | ML-DSA-44 | 2 | 1312 B | 2420 B |
+| `0x01` | ML-DSA-65 | 3 | 1952 B | 3309 B |
+
+`0x00` is what clients sent before ML-DSA-65 existed, so the protocol is
+unchanged for them. The two keys of a BIP32 path are independent (each set has
+its own SLIP-0010 personalization).
+
+The ML-DSA half is the *pure* FIPS 204 signature of the 32-byte hash with an
+empty context, i.e. of `M' = 0x00 || 0x00 || hash` — exactly what the
+ETHDILITHIUM on-chain verifiers `ZKNOX_dilithium` and `ZKNOX_dilithium65`
+check in `verify(pk, bytes32 hash, sig)`, so a device signature is verifiable
+on-chain as is.
+
+* Wire protocol: [`APP_SPECIFICATION.md`](APP_SPECIFICATION.md)
+* Host tooling: [`js/README.md`](js/README.md) (`--mldsa 65`)
+* Tests: `pytest tests/standalone --device nanosp` against a `TEST_INS=1` build
+  (the NIST ACVP vectors are replayed on-device through `KEYGEN_DILITHIUM_CORE`,
+  which production builds do not expose; every signature is verified against
+  FIPS 204)
+
+> **Nano X:** `SIGN_TX_MLDSA` (0x08), which answers the public key and the
+> signature in a single APDU, needs an I/O buffer that does not fit beside the
+> stack in 28 KB of SRAM and returns `SWO_INVALID_INS` there. Both parameter
+> sets remain fully usable on Nano X through the hybrid flows and the
+> chunk-fetched primitives.
+
+---
 
 # Ledger Boilerplate Application
 

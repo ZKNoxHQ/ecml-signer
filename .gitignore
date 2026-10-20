@@ -2,8 +2,8 @@
 build/
 
 # Legacy compilation output
-bin/
-debug/
+/bin/
+/debug/
 
 # Nano NBGL reversed icon for Home Screen
 glyphs/home_boilerplate_14px.gif
@@ -28,6 +28,10 @@ __pycache__/
 *.egg-info/
 .eggs/
 .python-version
+.pytest_cache/
+
+# Node
+node_modules/
 
 # Doxygen
 doc/html
@@ -37,5 +41,3 @@ doc/latex
 ledger/
 
 # Helper script git clone
-tests/swap/.test_dependencies/app-exchange/
-tests/swap/.test_dependencies/app-ethereum/

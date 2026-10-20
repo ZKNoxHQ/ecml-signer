@@ -15,16 +15,18 @@
 #include "sw.h"
 #include "validate.h"
 #include "menu.h"
+#include "mldsa_derive.h"
 
 // Preview length shown on-screen. 32 bytes = 64 hex chars matches a typical
 // message-hash size (Keccak-256 / SHA-256) — the most common ML-DSA use case.
 #define PQ_SIGN_HEX_PREVIEW_BYTES 32
 
 // Buffer for the "%d bytes" length label.
-static char  g_pq_length[16];
+static char g_pq_length[16];
 // Hex preview: PQ_SIGN_HEX_PREVIEW_BYTES * 2 + ellipsis + NUL.
-static char  g_pq_hex[PQ_SIGN_HEX_PREVIEW_BYTES * 2 + 4];
-static nbgl_contentTagValue_t     pq_pairs[2];
+static char g_pq_hex[PQ_SIGN_HEX_PREVIEW_BYTES * 2 + 4];
+// Signer / Length / Payload.
+static nbgl_contentTagValue_t pq_pairs[3];
 static nbgl_contentTagValueList_t pq_pairList;
 
 static void pq_review_choice(bool confirm) {
@@ -39,9 +41,7 @@ static void pq_review_choice(bool confirm) {
 int ui_display_pq_sign(void) {
     if (G_context.req_type != CONFIRM_PQ_SIGN || G_context.state != STATE_PARSED) {
         G_context.state = STATE_NONE;
-        PRINTF("ui_display_pq_sign: bad state %d/%d\n",
-               G_context.req_type,
-               G_context.state);
+        PRINTF("ui_display_pq_sign: bad state %d/%d\n", G_context.req_type, G_context.state);
         return io_send_sw(SWO_CONDITIONS_NOT_SATISFIED);
     }
 
@@ -61,22 +61,28 @@ int ui_display_pq_sign(void) {
     if (G_context.tx_info.raw_tx_len > PQ_SIGN_HEX_PREVIEW_BYTES) {
         size_t len = strlen(g_pq_hex);
         if (len + 3 < sizeof(g_pq_hex)) {
-            g_pq_hex[len]     = '.';
+            g_pq_hex[len] = '.';
             g_pq_hex[len + 1] = '.';
             g_pq_hex[len + 2] = '.';
             g_pq_hex[len + 3] = '\0';
         }
     }
 
-    pq_pairs[0].item  = "Length";
-    pq_pairs[0].value = g_pq_length;
-    pq_pairs[1].item  = "Payload";
-    pq_pairs[1].value = g_pq_hex;
+    // SIGN_DILITHIUM has no parameter-set selector of its own: it signs with
+    // the key the last keygen loaded. Show which one, from the same field
+    // crypto_pq_sign() signs with, so the screen cannot disagree with the
+    // signature.
+    pq_pairs[0].item = "Signer";
+    pq_pairs[0].value = mldsa_param_name(G_context.tx_info.mldsa_param);
+    pq_pairs[1].item = "Length";
+    pq_pairs[1].value = g_pq_length;
+    pq_pairs[2].item = "Payload";
+    pq_pairs[2].value = g_pq_hex;
 
     pq_pairList.nbMaxLinesForValue = 0;
-    pq_pairList.nbPairs            = 2;
-    pq_pairList.pairs              = pq_pairs;
-    pq_pairList.wrapping           = true;
+    pq_pairList.nbPairs = ARRAYLEN(pq_pairs);
+    pq_pairList.pairs = pq_pairs;
+    pq_pairList.wrapping = true;
 
     const char *review_text = "Review\nML-DSA payload";
 #ifdef SCREEN_SIZE_WALLET
@@ -89,7 +95,7 @@ int ui_display_pq_sign(void) {
     // the SDK surfaces its warning.
     nbgl_useCaseReviewBlindSigning(TYPE_TRANSACTION,
                                    &pq_pairList,
-                                   &ICON_APP_BOILERPLATE,
+                                   &ICON_APP,
                                    review_text,
                                    NULL,
                                    sign_text,

@@ -39,6 +39,8 @@
 #include "ecdsa_sign_hash.h"
 #include "hybrid_sign_hash.h"
 #include "hybrid_sign_userop.h"
+#include "test_settings.h"
+#include "mldsa_derive.h"
 
 int apdu_dispatcher(const command_t *cmd) {
     LEDGER_ASSERT(cmd != NULL, "NULL cmd");
@@ -48,6 +50,9 @@ int apdu_dispatcher(const command_t *cmd) {
     }
 
     buffer_t buf = {0};
+    // ML-DSA parameter set selector, carried in P2 by the ML-DSA INS
+    // (0x00 = ML-DSA-44, 0x01 = ML-DSA-65; anything else is rejected).
+    MLDSA_param_t mldsa_param = MLDSA_44;
 
     switch (cmd->ins) {
         case GET_VERSION:
@@ -81,13 +86,39 @@ int apdu_dispatcher(const command_t *cmd) {
 
         case SIGN_TX:
         case SIGN_TOKEN_TX:
-        case SIGN_TX_MLDSA:
+        case SIGN_TX_MLDSA: {
             // Common handler for SIGN_TX / SIGN_TOKEN_TX / SIGN_TX_MLDSA: chunked upload of
             // BIP32 path + raw transaction. Only the signing algorithm differs at approval time.
+            // SIGN_TX_MLDSA carries the ML-DSA parameter set in the low bits of P2
+            // (P2 = more-flag | param: 0x80 / 0x00 for ML-DSA-44 as before, 0x81 / 0x01
+            // for ML-DSA-65); SIGN_TX / SIGN_TOKEN_TX keep P2 in {0x00, 0x80}.
             PRINTF("APDU_DISPATCHER: %d\n", cmd->ins);
-            if ((cmd->p1 == P1_START && cmd->p2 != P2_MORE) ||  //
-                cmd->p1 > P1_MAX ||                             //
-                (cmd->p2 != P2_LAST && cmd->p2 != P2_MORE)) {
+            uint8_t p2_more = cmd->p2 & P2_MORE;
+            uint8_t p2_param = cmd->p2 & MLDSA_P2_PARAM_MASK;
+            if (cmd->ins == SIGN_TX_MLDSA) {
+                if (!mldsa_param_from_p2(p2_param, &mldsa_param)) {
+                    return io_send_sw(SWO_INCORRECT_P1_P2);
+                }
+                // SIGN_TX_MLDSA answers pk + sig in ONE response, which needs an
+                // enlarged I/O buffer; on the devices where that buffer does not
+                // fit in RAM (Nano X) the larger parameter set is refused here.
+                // ML-DSA-65 stays available everywhere through the hybrid flows
+                // and the chunk-fetched primitives. See the Makefile.
+#if MLDSA_SIGN_TX_MAX_PARAM < 0
+                // This device has no I/O buffer for the single pk + sig
+                // response (see the Makefile): the INS is unavailable here.
+                PRINTF("SIGN_TX_MLDSA: unavailable on this device\n");
+                return io_send_sw(SWO_INVALID_INS);
+#else
+                if ((int) mldsa_param > MLDSA_SIGN_TX_MAX_PARAM) {
+                    PRINTF("SIGN_TX_MLDSA: parameter set unavailable on this device\n");
+                    return io_send_sw(SWO_INCORRECT_P1_P2);
+                }
+#endif
+            } else if (p2_param != 0) {
+                return io_send_sw(SWO_INCORRECT_P1_P2);
+            }
+            if ((cmd->p1 == P1_START && p2_more != P2_MORE) || cmd->p1 > P1_MAX) {
                 return io_send_sw(SWO_INCORRECT_P1_P2);
             }
 
@@ -101,9 +132,11 @@ int apdu_dispatcher(const command_t *cmd) {
 
             return handler_sign_tx(&buf,
                                    cmd->p1,
-                                   (bool) (cmd->p2 & P2_MORE),
+                                   (bool) p2_more,
                                    cmd->ins == SIGN_TOKEN_TX,
-                                   cmd->ins == SIGN_TX_MLDSA);
+                                   cmd->ins == SIGN_TX_MLDSA,
+                                   mldsa_param);
+        }
 
         case PROVIDE_TOKEN_INFO:
             if (cmd->p1 != 0 || cmd->p2 != 0) {
@@ -120,6 +153,9 @@ int apdu_dispatcher(const command_t *cmd) {
 
             return handler_provide_token_info(&buf);
 
+#ifdef HAVE_TEST_INS
+        // Test-only INS: absent from production builds (see HAVE_TEST_INS in the
+        // Makefile). An unknown INS falls through to SWO_INVALID_INS below.
         case DUMMY:
             if (!cmd->data) {
                 return io_send_sw(SWO_WRONG_DATA_LENGTH);
@@ -132,6 +168,11 @@ int apdu_dispatcher(const command_t *cmd) {
             return handler_cmd_dummy(&buf);
 
         case SAMPLE_IN_BALL:
+            // P2 selects the parameter set (tau = 39 or 49); P1 is free.
+            if (!mldsa_param_from_p2(cmd->p2, &mldsa_param)) {
+                return io_send_sw(SWO_INCORRECT_P1_P2);
+            }
+
             if (!cmd->data) {
                 return io_send_sw(SWO_WRONG_DATA_LENGTH);
             }
@@ -140,10 +181,10 @@ int apdu_dispatcher(const command_t *cmd) {
             buf.size = cmd->lc;
             buf.offset = 0;
 
-            return handler_cmd_sample_in_ball(&buf);
+            return handler_cmd_sample_in_ball(&buf, mldsa_param);
 
         case KEYGEN_DILITHIUM_CORE:
-            if (cmd->p1 != 0 || cmd->p2 != 0) {
+            if (cmd->p1 != 0 || !mldsa_param_from_p2(cmd->p2, &mldsa_param)) {
                 return io_send_sw(SWO_INCORRECT_P1_P2);
             }
 
@@ -155,10 +196,19 @@ int apdu_dispatcher(const command_t *cmd) {
             buf.size = cmd->lc;
             buf.offset = 0;
 
-            return handler_cmd_keygen_core_dilithium(&buf);
+            return handler_cmd_keygen_core_dilithium(&buf, mldsa_param);
+
+        case SET_SETTING:
+            // Takes everything in P1/P2; no data expected.
+            if (cmd->lc != 0) {
+                return io_send_sw(SWO_WRONG_DATA_LENGTH);
+            }
+
+            return handler_set_setting(cmd->p1, cmd->p2);
+#endif  // HAVE_TEST_INS
 
         case KEYGEN_DILITHIUM:
-            if (cmd->p1 != 0 || cmd->p2 != 0) {
+            if (cmd->p1 != 0 || !mldsa_param_from_p2(cmd->p2, &mldsa_param)) {
                 return io_send_sw(SWO_INCORRECT_P1_P2);
             }
 
@@ -170,7 +220,7 @@ int apdu_dispatcher(const command_t *cmd) {
             buf.size = cmd->lc;
             buf.offset = 0;
 
-            return handler_cmd_keygen_dilithium(&buf);
+            return handler_cmd_keygen_dilithium(&buf, mldsa_param);
 
         case GET_PK_CHUNK:
             // No inbound data; P1/P2 carry the chunk index and length. Bounds
@@ -189,6 +239,12 @@ int apdu_dispatcher(const command_t *cmd) {
             return handler_cmd_get_sig_chunk(&buf, cmd->p1, cmd->p2);
 
         case SIGN_DILITHIUM:
+            // Signs an opaque host-supplied payload: the review screen can only
+            // show a hex preview, never the meaning of the bytes. Blind signing.
+            if (!BLIND_SIGNING_ALLOWED()) {
+                return io_send_sw(SW_BLIND_SIGNING_DISABLED);
+            }
+
             // P1 encodes the state machine step (0=init, 1=absorb, 128=finalize).
             // The handler validates P1; dispatcher just passes it through.
             if (cmd->p2 != 0) {
@@ -202,6 +258,12 @@ int apdu_dispatcher(const command_t *cmd) {
             return handler_cmd_sign_dilithium(&buf, cmd->p1);
 
         case ECDSA_SIGN_HASH:
+            // Signs a bare 32-byte digest: nothing about the preimage can be
+            // shown to the user. Blind signing by construction.
+            if (!BLIND_SIGNING_ALLOWED()) {
+                return io_send_sw(SW_BLIND_SIGNING_DISABLED);
+            }
+
             if (cmd->p1 != 0 || cmd->p2 != 0) {
                 return io_send_sw(SWO_INCORRECT_P1_P2);
             }
@@ -217,7 +279,15 @@ int apdu_dispatcher(const command_t *cmd) {
             return handler_ecdsa_sign_hash(&buf);
 
         case HYBRID_SIGN_HASH:
-            if (cmd->p1 != 0 || cmd->p2 != 0) {
+            // Same bare-digest exposure as ECDSA_SIGN_HASH, over both halves.
+            // Use HYBRID_SIGN_USEROP (0x17) with callData for a clear-signed
+            // hybrid signature.
+            if (!BLIND_SIGNING_ALLOWED()) {
+                return io_send_sw(SW_BLIND_SIGNING_DISABLED);
+            }
+
+            // P2 selects the ML-DSA parameter set of the hybrid signature.
+            if (cmd->p1 != 0 || !mldsa_param_from_p2(cmd->p2, &mldsa_param)) {
                 return io_send_sw(SWO_INCORRECT_P1_P2);
             }
 
@@ -229,12 +299,13 @@ int apdu_dispatcher(const command_t *cmd) {
             buf.size = cmd->lc;
             buf.offset = 0;
 
-            return handler_hybrid_sign_hash(&buf);
+            return handler_hybrid_sign_hash(&buf, mldsa_param);
 
         case HYBRID_SIGN_USEROP:
             // P1 encodes the 4-step state machine (0=path, 1=metadata,
             // 2=packed, 3=calldata+finalize). Handler enforces the sequence.
-            if (cmd->p1 > 0x03 || cmd->p2 != 0) {
+            // P2 selects the ML-DSA parameter set (same value on every step).
+            if (cmd->p1 > 0x03 || !mldsa_param_from_p2(cmd->p2, &mldsa_param)) {
                 return io_send_sw(SWO_INCORRECT_P1_P2);
             }
 
@@ -247,7 +318,7 @@ int apdu_dispatcher(const command_t *cmd) {
             buf.size = cmd->lc;
             buf.offset = 0;
 
-            return handler_hybrid_sign_userop(&buf, cmd->p1);
+            return handler_hybrid_sign_userop(&buf, cmd->p1, mldsa_param);
 
         default:
             return io_send_sw(SWO_INVALID_INS);

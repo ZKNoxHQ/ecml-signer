@@ -16,47 +16,55 @@
 #include "validate.h"
 #include "menu.h"
 #include "hybrid_sign_userop.h"
+#include "mldsa_derive.h"
+
+// A uint256 has at most 78 decimal digits (2^256 - 1 ~ 1.16e77).
+#define UINT256_DEC_DIGITS 78
+// 20-byte address as hex, as format_hex writes it (2 chars per byte + NUL).
+#define ADDRESS_HEX_LEN (20 * 2 + 1)
+#define HASH_HEX_LEN    (32 * 2 + 1)
 
 // Pair buffers. Static so NBGL can hold pointers across the review flow.
-// Sizes match what the ZKNOX reference used: 21 chars for uint64 decimals,
-// 43 for a 0x-prefixed 20-byte address, 67 for a 0x-prefixed 32-byte hash.
-static char g_userop_chain[21];
-static char g_userop_sender[43];
-static char g_userop_to[43];
-static char g_userop_value[67];  // large enough for decimal wei or hex fallback
-static char g_userop_hash[67];
+static char g_userop_chain[UINT256_DEC_DIGITS + 1];
+static char g_userop_sender[ADDRESS_HEX_LEN];
+static char g_userop_token[ADDRESS_HEX_LEN];
+static char g_userop_to[ADDRESS_HEX_LEN];
+static char g_userop_value[UINT256_DEC_DIGITS + 1];
+static char g_userop_hash[HASH_HEX_LEN];
+// "ECDSA + ML-DSA-44" / "ECDSA + ML-DSA-65"
+static char g_userop_scheme[8 + 9 + 1];
 
-// Up to 5 pairs: chain / sender / to / value / hash-fallback. Only one of
-// (to+value) vs (hash) is populated at a time, so max 4 in practice.
-static nbgl_contentTagValue_t     userop_pairs[5];
+// At most: signer / chain / sender / token / to / amount (ERC-20 transfer).
+static nbgl_contentTagValue_t userop_pairs[6];
 static nbgl_contentTagValueList_t userop_pairList;
 
-// Big-endian uint256 → decimal string, if it fits in uint64_t. Returns false
-// if any of the top 24 bytes are nonzero (overflow) or if the output buffer
-// is too small.
+// Big-endian uint256 -> decimal, full width (no uint64 truncation, no hex
+// fallback): long division by 10 over a 32-byte copy. Returns false only if
+// the output buffer is too small.
 static bool uint256_be_to_dec(const uint8_t be[32], char *out, size_t out_len) {
-    for (int i = 0; i < 24; i++) {
-        if (be[i] != 0) return false;
+    uint8_t n[32];
+    char rev[UINT256_DEC_DIGITS];
+    size_t pos = 0;
+    bool nonzero;
+
+    memmove(n, be, sizeof(n));
+    do {
+        uint32_t rem = 0;
+        nonzero = false;
+        for (size_t i = 0; i < sizeof(n); i++) {
+            uint32_t cur = (rem << 8) | n[i];
+            n[i] = (uint8_t) (cur / 10);
+            rem = cur % 10;
+            nonzero |= (n[i] != 0);
+        }
+        rev[pos++] = (char) ('0' + rem);
+    } while (nonzero && pos < sizeof(rev));
+
+    if (nonzero || pos + 1 > out_len) {
+        return false;
     }
-    uint64_t v = 0;
-    for (int i = 24; i < 32; i++) {
-        v = (v << 8) | be[i];
-    }
-    if (v == 0) {
-        if (out_len < 2) return false;
-        out[0] = '0';
-        out[1] = '\0';
-        return true;
-    }
-    char tmp[21];  // UINT64_MAX has 20 digits + NUL
-    int  pos = 0;
-    while (v > 0 && pos < (int) sizeof(tmp) - 1) {
-        tmp[pos++] = '0' + (char) (v % 10);
-        v /= 10;
-    }
-    if ((size_t) pos + 1 > out_len) return false;
-    for (int i = 0; i < pos; i++) {
-        out[i] = tmp[pos - 1 - i];
+    for (size_t i = 0; i < pos; i++) {
+        out[i] = rev[pos - 1 - i];
     }
     out[pos] = '\0';
     return true;
@@ -86,54 +94,77 @@ int ui_display_hybrid_sign_userop(void) {
 
     explicit_bzero(g_userop_chain, sizeof(g_userop_chain));
     explicit_bzero(g_userop_sender, sizeof(g_userop_sender));
+    explicit_bzero(g_userop_token, sizeof(g_userop_token));
     explicit_bzero(g_userop_to, sizeof(g_userop_to));
     explicit_bzero(g_userop_value, sizeof(g_userop_value));
     explicit_bzero(g_userop_hash, sizeof(g_userop_hash));
 
+    // Every line below is mandatory for its review: if one cannot be
+    // formatted, refuse to review rather than show a partial screen.
+    bool ok = true;
     int pair_index = 0;
+    const userop_call_kind_t kind = userop_get_call_kind();
 
-    if (uint256_be_to_dec(userop_get_chain_id(), g_userop_chain, sizeof(g_userop_chain))) {
-        userop_pairs[pair_index].item  = "Chain ID";
-        userop_pairs[pair_index].value = g_userop_chain;
-        pair_index++;
+    // The ML-DSA parameter set is chosen by the host (P2): show it so the
+    // user knows which of the two independent ML-DSA keys is used.
+    snprintf(g_userop_scheme,
+             sizeof(g_userop_scheme),
+             "ECDSA + %s",
+             mldsa_param_name(G_context.tx_info.mldsa_param));
+    userop_pairs[pair_index].item = "Signer";
+    userop_pairs[pair_index++].value = g_userop_scheme;
+
+    ok &= uint256_be_to_dec(userop_get_chain_id(), g_userop_chain, sizeof(g_userop_chain));
+    userop_pairs[pair_index].item = "Chain ID";
+    userop_pairs[pair_index++].value = g_userop_chain;
+
+    ok &= format_hex(userop_get_sender(), 20, g_userop_sender, sizeof(g_userop_sender)) != -1;
+    userop_pairs[pair_index].item = "Sender";
+    userop_pairs[pair_index++].value = g_userop_sender;
+
+    switch (kind) {
+        case USEROP_CALL_NATIVE:
+            ok &= format_hex(userop_get_call_to(), 20, g_userop_to, sizeof(g_userop_to)) != -1;
+            userop_pairs[pair_index].item = "To";
+            userop_pairs[pair_index++].value = g_userop_to;
+            ok &=
+                uint256_be_to_dec(userop_get_call_value(), g_userop_value, sizeof(g_userop_value));
+            userop_pairs[pair_index].item = "Value (wei)";
+            userop_pairs[pair_index++].value = g_userop_value;
+            break;
+        case USEROP_CALL_ERC20:
+            // No token metadata for this chain on the device: show the
+            // contract and the raw amount, never a guessed ticker/decimals.
+            ok &= format_hex(userop_get_call_token(), 20, g_userop_token, sizeof(g_userop_token)) !=
+                  -1;
+            userop_pairs[pair_index].item = "Token";
+            userop_pairs[pair_index++].value = g_userop_token;
+            ok &= format_hex(userop_get_call_to(), 20, g_userop_to, sizeof(g_userop_to)) != -1;
+            userop_pairs[pair_index].item = "To";
+            userop_pairs[pair_index++].value = g_userop_to;
+            ok &=
+                uint256_be_to_dec(userop_get_call_value(), g_userop_value, sizeof(g_userop_value));
+            userop_pairs[pair_index].item = "Amount (base units)";
+            userop_pairs[pair_index++].value = g_userop_value;
+            break;
+        default:
+            // Nothing decodable: blind signing, show the hash that is signed.
+            ok &= format_hex(G_context.tx_info.m_hash, 32, g_userop_hash, sizeof(g_userop_hash)) !=
+                  -1;
+            userop_pairs[pair_index].item = "UserOp Hash";
+            userop_pairs[pair_index++].value = g_userop_hash;
+            break;
     }
 
-    if (format_hex(userop_get_sender(), 20, g_userop_sender, sizeof(g_userop_sender)) != -1) {
-        userop_pairs[pair_index].item  = "Sender";
-        userop_pairs[pair_index].value = g_userop_sender;
-        pair_index++;
-    }
-
-    if (userop_has_call_info()) {
-        if (format_hex(userop_get_call_to(), 20, g_userop_to, sizeof(g_userop_to)) != -1) {
-            userop_pairs[pair_index].item  = "To";
-            userop_pairs[pair_index].value = g_userop_to;
-            pair_index++;
-        }
-        // Decimal wei if it fits in uint64; hex fallback otherwise.
-        if (!uint256_be_to_dec(userop_get_call_value(),
-                               g_userop_value,
-                               sizeof(g_userop_value))) {
-            format_hex(userop_get_call_value(), 32, g_userop_value, sizeof(g_userop_value));
-        }
-        if (g_userop_value[0] != '\0') {
-            userop_pairs[pair_index].item  = "Value (wei)";
-            userop_pairs[pair_index].value = g_userop_value;
-            pair_index++;
-        }
-    } else {
-        // No callData parsed — show the computed UserOpHash for transparency.
-        if (format_hex(G_context.tx_info.m_hash, 32, g_userop_hash, sizeof(g_userop_hash)) != -1) {
-            userop_pairs[pair_index].item  = "UserOp Hash";
-            userop_pairs[pair_index].value = g_userop_hash;
-            pair_index++;
-        }
+    if (!ok) {
+        G_context.state = STATE_NONE;
+        return io_send_sw(SWO_INCORRECT_DATA);
     }
 
     userop_pairList.nbMaxLinesForValue = 0;
-    userop_pairList.nbPairs            = pair_index;
-    userop_pairList.pairs              = userop_pairs;
-    userop_pairList.wrapping           = true;
+    userop_pairList.nbPairs = pair_index;
+    userop_pairList.pairs = userop_pairs;
+    userop_pairList.wrapping = true;
 
     const char *review_text = "Review UserOp\nfor hybrid signing";
 #ifdef SCREEN_SIZE_WALLET
@@ -142,15 +173,27 @@ int ui_display_hybrid_sign_userop(void) {
     const char *sign_text = NULL;
 #endif
 
-    // When callData was parsed, this is a proper clear-sign flow; when not,
-    // it degrades to blind-sign of the userOpHash. NBGL's Review flow is fine
-    // in both cases — the pair list content differs, not the flow.
-    nbgl_useCaseReview(TYPE_TRANSACTION,
-                       &userop_pairList,
-                       &ICON_APP_BOILERPLATE,
-                       review_text,
-                       NULL,
-                       sign_text,
-                       userop_review_choice);
+    if (kind != USEROP_CALL_NONE) {
+        // Clear signing: a decoded native or ERC-20 transfer.
+        nbgl_useCaseReview(TYPE_TRANSACTION,
+                           &userop_pairList,
+                           &ICON_APP,
+                           review_text,
+                           NULL,
+                           sign_text,
+                           userop_review_choice);
+    } else {
+        // Only the userOpHash can be shown: blind signing. The handler only
+        // gets here when the user has opted in to blind signing; surface the
+        // SDK warning like every other blind flow of the app.
+        nbgl_useCaseReviewBlindSigning(TYPE_TRANSACTION,
+                                       &userop_pairList,
+                                       &ICON_APP,
+                                       review_text,
+                                       NULL,
+                                       sign_text,
+                                       NULL,
+                                       userop_review_choice);
+    }
     return 0;
 }

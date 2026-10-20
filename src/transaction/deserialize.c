@@ -18,7 +18,7 @@
 
 #include "deserialize.h"
 #include "utils.h"
-#include "types.h"
+#include "tx_types.h"
 
 #if defined(TEST) || defined(FUZZ)
 #include "assert.h"

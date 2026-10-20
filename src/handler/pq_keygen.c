@@ -12,12 +12,15 @@
 #include "sw.h"
 
 static int keygen_common(void) {
-    // Secret key is bulky (~2560 B for ML-DSA-44). Keep it on the stack scoped
-    // to this function so it is scrubbed on return rather than living in .bss.
-    uint8_t sk[MLDSA44_SECRETKEYBYTES] = {0};
+    // Secret key is bulky (2560 B for ML-DSA-44, 4032 B for ML-DSA-65). Keep
+    // it on the stack scoped to this function so it is scrubbed on return
+    // rather than living in .bss.
+    uint8_t sk[MLDSA_APP_MAX_SECRETKEYBYTES] = {0};
 
     int rc = mldsa_keygen_from_seed(G_context.tx_info.mldsa_seed,
+                                    G_context.tx_info.mldsa_param,
                                     G_context.tx_info.mldsa_pk,
+                                    sizeof(G_context.tx_info.mldsa_pk),
                                     sk,
                                     sizeof(sk));
     explicit_bzero(sk, sizeof(sk));
@@ -36,18 +39,26 @@ static int keygen_common(void) {
     return io_send_sw(SWO_SUCCESS);
 }
 
-int handler_cmd_keygen_core_dilithium(buffer_t *cdata) {
+// Test-only (KEYGEN_DILITHIUM_CORE 0x0c): keygen from a HOST-SUPPLIED seed.
+// Needed for the NIST ACVP vectors, and compiled out of production builds so no
+// host can drive key generation with a seed of its choosing. The production
+// entry point is handler_cmd_keygen_dilithium below, which derives from BIP32.
+#ifdef HAVE_TEST_INS
+int handler_cmd_keygen_core_dilithium(buffer_t *cdata, MLDSA_param_t param) {
     if (cdata->size != MLDSA_DERIVE_SEED_LEN) {
         return io_send_sw(SWO_WRONG_DATA_LENGTH);
     }
 
     explicit_bzero(&G_context, sizeof(G_context));
+    G_context.tx_info.mldsa_param = param;
     memmove(G_context.tx_info.mldsa_seed, cdata->ptr, MLDSA_DERIVE_SEED_LEN);
     return keygen_common();
 }
+#endif  // HAVE_TEST_INS
 
-int handler_cmd_keygen_dilithium(buffer_t *cdata) {
+int handler_cmd_keygen_dilithium(buffer_t *cdata, MLDSA_param_t param) {
     explicit_bzero(&G_context, sizeof(G_context));
+    G_context.tx_info.mldsa_param = param;
 
     if (!buffer_read_u8(cdata, &G_context.bip32_path_len) ||
         !buffer_read_bip32_path(cdata, G_context.bip32_path, (size_t) G_context.bip32_path_len)) {
@@ -56,6 +67,7 @@ int handler_cmd_keygen_dilithium(buffer_t *cdata) {
 
     if (mldsa_derive_seed(G_context.bip32_path,
                           G_context.bip32_path_len,
+                          param,
                           G_context.tx_info.mldsa_seed) != 0) {
         return io_send_sw(SWO_SECURITY_ISSUE);
     }

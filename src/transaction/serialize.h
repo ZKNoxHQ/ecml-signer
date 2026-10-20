@@ -4,7 +4,7 @@
 #include <stdbool.h>  // bool
 #include <stddef.h>   // size_t
 
-#include "types.h"
+#include "tx_types.h"
 
 /**
  * Serialize transaction in byte buffer.

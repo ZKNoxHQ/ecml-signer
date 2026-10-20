@@ -26,7 +26,7 @@
 #include "ledger_assert.h"
 #endif
 
-#include "types.h"
+#include "tx_types.h"
 
 bool transaction_utils_check_encoding(const uint8_t *memo, uint64_t memo_len) {
     LEDGER_ASSERT(memo != NULL, "NULL memo");

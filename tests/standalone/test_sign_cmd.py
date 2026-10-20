@@ -55,6 +55,7 @@ def test_sign_tx_short_tx(backend: BackendInterface, scenario_navigator: Navigat
 # In this test we send to the device a transaction to trig a blind-signing flow
 # The transaction is short and will be sent in one chunk
 # We will ensure that the displayed information is correct by using screenshots comparison
+@pytest.mark.usefixtures("blind_signing_enabled")
 def test_sign_tx_short_tx_blind_sign(backend: BackendInterface, scenario_navigator: NavigateWithScenario) -> None:
     # Use the app interface instead of raw interface
     client = BoilerplateCommandSender(backend)

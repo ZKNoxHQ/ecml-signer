@@ -29,7 +29,7 @@ int handler_ecdsa_sign_hash(buffer_t *cdata) {
         return io_send_sw(SWO_INCORRECT_DATA);
     }
 
-    G_context.state    = STATE_PARSED;
+    G_context.state = STATE_PARSED;
     G_context.req_type = CONFIRM_ECDSA_SIGN_HASH;
 
     return ui_display_ecdsa_sign_hash();

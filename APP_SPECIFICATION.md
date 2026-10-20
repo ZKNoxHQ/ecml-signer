@@ -20,6 +20,134 @@ The application interface can be accessed over HID or BLE
 
 ## APDUs
 
+### INSTRUCTION INDEX
+
+Every instruction the dispatcher accepts, with `CLA = 0xE0`. This table is the
+authoritative list; it must stay in step with `InsType` in `src/types.h`.
+
+| INS | Name | Purpose | Availability |
+|---|---|---|---|
+| `0x03` | `GET_VERSION` | application version | always |
+| `0x04` | `GET_APP_NAME` | application name | always |
+| `0x05` | `GET_PUBLIC_KEY` | secp256k1 public key of a BIP32 path | always |
+| `0x06` | `SIGN_TX` | sign a serialized transaction | always |
+| `0x07` | `SIGN_TOKEN_TX` | sign a token transfer | always |
+| `0x08` | `SIGN_TX_MLDSA` | sign a transaction with an ML-DSA key | always (not Nano X, see below) |
+| `0x0A` | `DUMMY` | echo `cdata`, I/O smoke test | **test builds only** |
+| `0x0B` | `SAMPLE_IN_BALL` | raw ML-DSA SampleInBall over host input | **test builds only** |
+| `0x0C` | `KEYGEN_DILITHIUM_CORE` | ML-DSA keygen from a host-supplied seed | **test builds only** |
+| `0x0D` | `SET_SETTING` | write an NVM setting (P1 = id, P2 = value) | **test builds only** |
+| `0x0F` | `SIGN_DILITHIUM` | ML-DSA sign of a loaded payload (3-step) | blind signing |
+| `0x11` | `KEYGEN_DILITHIUM` | ML-DSA keygen from a BIP32 path | always |
+| `0x12` | `GET_SIG_CHUNK` | fetch a slice of the stored signature | always |
+| `0x13` | `GET_PK_CHUNK` | fetch a slice of the stored public key | always |
+| `0x15` | `ECDSA_SIGN_HASH` | sign a bare 32-byte hash with secp256k1 | blind signing |
+| `0x16` | `HYBRID_SIGN_HASH` | sign a hash with ECDSA **and** ML-DSA | blind signing |
+| `0x17` | `HYBRID_SIGN_USEROP` | hybrid clear-sign of an ERC-4337 v0.7 UserOp | always for a native or ERC-20 transfer; otherwise blind signing (see below) |
+| `0x22` | `PROVIDE_TOKEN_INFO` | provide dynamic token info (CAL TLV) | always |
+
+Any other INS returns `SWO_INVALID_INS`.
+
+#### Test-only instructions
+
+`0x0A`, `0x0B`, `0x0C` and `0x0D` are compiled in only when the app is built with
+`DEBUG=1` or `TEST_INS=1` (`HAVE_TEST_INS`). On a production build they are
+absent from the binary and answer `SWO_INVALID_INS` like any unknown INS.
+`0x0C` is the reason for the gate: it runs key generation from a seed chosen by
+the host, which must never be reachable on a device holding real funds. The
+`tests/standalone` suite needs these instructions (NIST ACVP vectors, primitive
+determinism, and `SET_SETTING` to reach a known settings state), so it requires
+a `TEST_INS=1` build.
+
+`SET_SETTING` takes `P1` = setting id (`0x00` = blind signing), `P2` = value
+(`0x00` off, `0x01` on) and no data; anything else is `SWO_INCORRECT_P1_P2` or
+`SWO_WRONG_DATA_LENGTH`. It deliberately bypasses the Settings UI, whose own
+path is covered by `tests/standalone/test_blind_signing.py`.
+
+#### Blind signing
+
+Instructions marked *blind signing* sign bytes whose meaning the review screen
+cannot represent: a bare 32-byte digest (`0x15`, `0x16`), an opaque payload
+shown only as a hex preview (`0x0F`), or a UserOp the device cannot
+clear-sign (`0x17`, see below). They are refused with
+`SW_BLIND_SIGNING_DISABLED` (`0xB00A`) unless the user has turned **Blind
+signing** on in the app Settings. The setting is stored in NVM
+(`internal_storage_t.blind_signing_allowed`), defaults to **off** on a fresh
+install, and enabling it requires confirming a warning screen. The device never
+downgrades a clear-signed review to a blind one on its own.
+
+`HYBRID_SIGN_USEROP` clear-signs exactly two shapes of `callData`, both a
+canonically ABI-encoded `execute(address dest, uint256 value, bytes data)`
+(selector `0xb61d27f6`, `data` offset `0x60`, zero address and padding bytes,
+nothing trailing):
+
+| Inner `data` | Shown as |
+|---|---|
+| empty | native transfer: **To** = `dest`, **Value (wei)** = `value` |
+| `transfer(address to, uint256 amount)` (selector `0xa9059cbb`, exactly 68 bytes), with `value == 0` | ERC-20 transfer: **Token** = `dest`, **To** = `to`, **Amount (base units)** = `amount` |
+
+Everything else is blind signing: `callData` withheld (`Lc = 0` on `P1 = 0x03`),
+another outer call (`executeBatch`, ...), any other inner call (`approve`, a
+swap, ...), a transfer that also sends native value, or a non-canonical
+encoding. Its review shows only the userOpHash. The device has no token
+metadata for these chains, so ERC-20 amounts are shown in base units next to
+the token contract, never with a guessed ticker or decimals. Amounts, values
+and the chain ID are shown in full as decimal integers.
+
+### ML-DSA PARAMETER SET (P2)
+
+Every ML-DSA instruction takes the parameter set in **P2**:
+
+| P2 | Parameter set | pk | signature | c~ | tau | omega |
+|----|---------------|----|-----------|----|-----|-------|
+| `0x00` | ML-DSA-44 (FIPS 204, category 2) | 1312 B | 2420 B | 32 B | 39 | 80 |
+| `0x01` | ML-DSA-65 (FIPS 204, category 3) | 1952 B | 3309 B | 48 B | 49 | 55 |
+
+Any other value returns `SWO_INCORRECT_P1_P2`. `0x00` is the value every
+client sent before ML-DSA-65 existed, so the protocol is unchanged for them.
+
+Instructions carrying the selector: `KEYGEN_DILITHIUM_CORE` (0x0C),
+`KEYGEN_DILITHIUM` (0x11), `SAMPLE_IN_BALL` (0x0B), `HYBRID_SIGN_HASH` (0x16),
+`HYBRID_SIGN_USEROP` (0x17, on *every* APDU of the sequence — the set is fixed
+by the `P1 = 0x00` one and a later APDU disagreeing is `SWO_INCORRECT_P1_P2`),
+and `SIGN_TX_MLDSA` (0x08, in the low bits of P2 beside the `0x80` more-flag:
+`0x80`/`0x00` for ML-DSA-44 as before, `0x81`/`0x01` for ML-DSA-65).
+
+`SIGN_DILITHIUM` (0x0F) does **not** take a selector either (its P2 must be
+`0x00`): it signs with the key loaded by the last `KEYGEN_DILITHIUM` /
+`KEYGEN_DILITHIUM_CORE`, in that key's parameter set. Load an ML-DSA-65 key
+first to get an ML-DSA-65 signature. Its review screen shows the set on a
+`Signer` line (`ML-DSA-44` / `ML-DSA-65`), read from the same state the
+signature is computed with.
+
+`GET_PK_CHUNK` (0x13) and `GET_SIG_CHUNK` (0x12) do **not** take a selector:
+they follow the parameter set of the key currently loaded, and refuse any
+`(P1, P2)` slice reaching past its real size with `SWO_WRONG_DATA_LENGTH`
+(1312 / 2420 bytes for ML-DSA-44, 1952 / 3309 for ML-DSA-65). The chunk
+sequences are therefore:
+
+| | ML-DSA-44 | ML-DSA-65 |
+|---|---|---|
+| public key | 5x255 + 37 | 7x255 + 167 |
+| signature  | 9x255 + 125 | 12x255 + 249 |
+
+**Key separation.** The seed of each set is derived over SLIP-0010 with its own
+personalization — `"ML-DSA-44 seed"` (unchanged, so keys stay interoperable
+with tooling built against ZKNOX-HW-MLDSA) and `"ML-DSA-65 seed"` — so the two
+keys of one BIP32 path are independent: a compromise of one says nothing about
+the other, and `rho` differs.
+
+**Device limitation.** `SIGN_TX_MLDSA` answers the public key *and* the
+signature in a single APDU (up to 5265 bytes for ML-DSA-65), which needs an
+enlarged I/O buffer. On **Nano X** that buffer cannot coexist with the ~14.2 KB
+of stack the review-and-signing path needs in 28 KB of SRAM, so the instruction
+returns `SWO_INVALID_INS` there. Every ML-DSA feature — both parameter sets —
+remains available on Nano X through `HYBRID_SIGN_HASH`, `HYBRID_SIGN_USEROP`
+and the `KEYGEN_DILITHIUM` + `SIGN_DILITHIUM` primitives, which return the
+ML-DSA material in 255-byte chunks. See `tests/standalone/test_stack_watermark.py`
+for the measurement.
+
+
 ### GET BOILERPLATE PUBLIC ADDRESS
 
 #### Description
@@ -309,7 +437,6 @@ The dynamic token information is stored in RAM only (not in NVM) and persists ac
 - Persists across `SIGN_TOKEN_TX` (token transactions)
 - Persists across `GET_PUBLIC_KEY` and other read-only commands
 - Cleared when app exits to dashboard
-- Cleared after every transaction in SWAP context
 - Overwritten when new `PROVIDE_TOKEN_INFO` command received (only one slot is handled)
 
 #### Coding
@@ -374,7 +501,7 @@ None (returns 0x9000 on success)
 | SW   | Description                                           |
 | ---  | ---                                                   |
 | B009 | SW_INVALID_DYNAMIC_TOKEN - TLV parsing failed, signature verification failed, wrong coin type, or TUID validation failed |
-| 6A86 | SWO_INCORRECT_P1_P2 - P1 or P2 not zero               |
+| 6A86 | SWO_INCORRECT_P1_P2 - P1 wrong, or P2 not a valid ML-DSA parameter set |
 | 6A87 | SWO_WRONG_DATA_LENGTH - Invalid TLV structure length  |
 
 **Note on testing:** Speculos emulator accepts test PKI certificates for signature validation,

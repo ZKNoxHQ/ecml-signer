@@ -3,9 +3,10 @@
 #include <stddef.h>  // size_t
 #include <stdint.h>  // uint*_t
 
-#define MAX_TX_LEN   510
-#define ADDRESS_LEN  20
-#define MAX_MEMO_LEN 465  // 510 - ADDRESS_LEN - 2*SIZE(U64) - SIZE(MAX_VARINT)
+#define MAX_TX_LEN        510
+#define ADDRESS_LEN       20
+#define MAX_MEMO_LEN      465  // 510 - ADDRESS_LEN - 2*SIZE(U64) - SIZE(MAX_VARINT)
+#define TOKEN_ADDRESS_LEN 32
 
 typedef enum {
     PARSING_OK = 1,

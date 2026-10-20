@@ -33,8 +33,8 @@ static int handle_init(void) {
     if (!is_key_loaded()) {
         return io_send_sw(SWO_CONDITIONS_NOT_SATISFIED);
     }
-    G_context.state         = STATE_NONE;
-    G_context.req_type      = CONFIRM_PQ_SIGN;
+    G_context.state = STATE_NONE;
+    G_context.req_type = CONFIRM_PQ_SIGN;
     G_context.tx_info.raw_tx_len = 0;
     return io_send_sw(SWO_SUCCESS);
 }
@@ -49,9 +49,7 @@ static int handle_absorb(buffer_t *cdata) {
     if (cdata->size == 0) {
         return io_send_sw(SWO_SUCCESS);
     }
-    memmove(G_context.tx_info.raw_tx + G_context.tx_info.raw_tx_len,
-            cdata->ptr,
-            cdata->size);
+    memmove(G_context.tx_info.raw_tx + G_context.tx_info.raw_tx_len, cdata->ptr, cdata->size);
     G_context.tx_info.raw_tx_len += cdata->size;
     return io_send_sw(SWO_SUCCESS);
 }

@@ -15,11 +15,14 @@
 #include "sw.h"
 #include "validate.h"
 #include "menu.h"
+#include "mldsa_derive.h"
 
 // 32-byte hash -> 64 hex chars + NUL. Kept as a static buffer because NBGL
 // retains the pointer across the review flow.
 static char g_hybrid_hash_hex[64 + 1];
-static nbgl_contentTagValue_t     hybrid_pairs[1];
+// "ECDSA + ML-DSA-44" / "ECDSA + ML-DSA-65"
+static char g_hybrid_scheme[8 + 9 + 1];
+static nbgl_contentTagValue_t hybrid_pairs[2];
 static nbgl_contentTagValueList_t hybrid_pairList;
 
 static void hybrid_hash_review_choice(bool confirm) {
@@ -41,18 +44,27 @@ int ui_display_hybrid_sign_hash(void) {
     }
 
     explicit_bzero(g_hybrid_hash_hex, sizeof(g_hybrid_hash_hex));
-    if (format_hex(G_context.tx_info.m_hash, 32, g_hybrid_hash_hex, sizeof(g_hybrid_hash_hex))
-        == -1) {
+    if (format_hex(G_context.tx_info.m_hash, 32, g_hybrid_hash_hex, sizeof(g_hybrid_hash_hex)) ==
+        -1) {
         return io_send_sw(SWO_INCORRECT_DATA);
     }
 
-    hybrid_pairs[0].item  = "Hash";
-    hybrid_pairs[0].value = g_hybrid_hash_hex;
+    // The ML-DSA parameter set is chosen by the host (P2): show it so the
+    // user knows which of the two independent ML-DSA keys is used.
+    snprintf(g_hybrid_scheme,
+             sizeof(g_hybrid_scheme),
+             "ECDSA + %s",
+             mldsa_param_name(G_context.tx_info.mldsa_param));
+
+    hybrid_pairs[0].item = "Signer";
+    hybrid_pairs[0].value = g_hybrid_scheme;
+    hybrid_pairs[1].item = "Hash";
+    hybrid_pairs[1].value = g_hybrid_hash_hex;
 
     hybrid_pairList.nbMaxLinesForValue = 0;
-    hybrid_pairList.nbPairs            = 1;
-    hybrid_pairList.pairs              = hybrid_pairs;
-    hybrid_pairList.wrapping           = true;
+    hybrid_pairList.nbPairs = 2;
+    hybrid_pairList.pairs = hybrid_pairs;
+    hybrid_pairList.wrapping = true;
 
     const char *review_text = "Review\nhybrid signature";
 #ifdef SCREEN_SIZE_WALLET
@@ -63,7 +75,7 @@ int ui_display_hybrid_sign_hash(void) {
 
     nbgl_useCaseReviewBlindSigning(TYPE_TRANSACTION,
                                    &hybrid_pairList,
-                                   &ICON_APP_BOILERPLATE,
+                                   &ICON_APP,
                                    review_text,
                                    NULL,
                                    sign_text,

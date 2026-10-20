@@ -4,6 +4,7 @@
 #include <stdbool.h>  // bool
 
 #include "buffer.h"
+#include "lcx_mldsa.h"
 
 /**
  * Handler for SIGN_TX command. If successfully parse BIP32 path
@@ -21,9 +22,17 @@
  * @param[in]   is_token_tx
  *  Whether the transaction to sign is a token transaction or not.
  * @param[in]   is_mldsa
- *  Whether the transaction must be signed with ML-DSA-44 instead of ECDSA.
+ *  Whether the transaction must be signed with ML-DSA instead of ECDSA.
+ * @param[in]   param
+ *  ML-DSA parameter set (SIGN_TX_MLDSA: low bits of P2, 0x00 = ML-DSA-44,
+ *  0x01 = ML-DSA-65), fixed by the first chunk; ignored when !is_mldsa.
  *
  * @return zero or positive integer if success, negative integer otherwise.
  *
  */
-int handler_sign_tx(buffer_t *cdata, uint8_t chunk, bool more, bool is_token_tx, bool is_mldsa);
+int handler_sign_tx(buffer_t *cdata,
+                    uint8_t chunk,
+                    bool more,
+                    bool is_token_tx,
+                    bool is_mldsa,
+                    MLDSA_param_t param);
