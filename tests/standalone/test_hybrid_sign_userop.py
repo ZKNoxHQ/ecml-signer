@@ -332,3 +332,99 @@ def test_userop_blind_variant_refused_without_opt_in(backend: BackendInterface) 
     with pytest.raises(ExceptionRAPDU) as e:
         backend.exchange(cla=CLA, ins=InsType.HYBRID_SIGN_USEROP, p1=P1_CALLDATA, p2=0, data=b"")
     assert e.value.status == Errors.SW_BLIND_SIGNING_DISABLED
+
+
+# ---- callData the device cannot clear-sign ------------------------------
+#
+# Only execute(address,uint256,bytes) yields To / Value. Any other callData is
+# hash-checked but leaves the review with nothing but the userOpHash, i.e. blind
+# signing: refused without the opt-in, and behind the SDK warning with it.
+
+# executeBatch(address[],uint256[],bytes[]) of the v0.7 SimpleAccount. The
+# device does not decode it; any non-execute selector takes the same path.
+EXECUTE_BATCH_SELECTOR = bytes.fromhex("47e1da2a")
+EXECUTE_BATCH_CALLDATA = (
+    EXECUTE_BATCH_SELECTOR
+    + (0x60).to_bytes(32, "big")  # offset of dest[]
+    + (0x80).to_bytes(32, "big")  # offset of value[]
+    + (0xA0).to_bytes(32, "big")  # offset of func[]
+    + (0).to_bytes(32, "big")  # dest[]  (empty)
+    + (0).to_bytes(32, "big")  # value[] (empty)
+    + (0).to_bytes(32, "big")  # func[]  (empty)
+)
+# The execute selector but too short to carry dest and value: must not be
+# mistaken for something clear-signable.
+EXECUTE_TRUNCATED_CALLDATA = CALLDATA[:40]
+
+UNPARSED_CALLDATA = [
+    pytest.param(EXECUTE_BATCH_CALLDATA, id="executeBatch"),
+    pytest.param(EXECUTE_TRUNCATED_CALLDATA, id="execute-truncated"),
+]
+
+
+def _packed_for(call_data: bytes) -> bytes:
+    """The packed fields with an honest hashCallData for `call_data`."""
+    return (
+        HASH_INIT_CODE
+        + _keccak256(call_data)
+        + ACCOUNT_GAS_LIMITS
+        + PRE_VERIF_GAS
+        + GAS_FEES
+        + HASH_PAYMASTER
+    )
+
+
+@pytest.mark.parametrize("call_data", UNPARSED_CALLDATA)
+def test_userop_unparsed_calldata_refused_without_opt_in(
+    backend: BackendInterface, call_data: bytes
+) -> None:
+    """Hash-valid callData that is not an execute call is blind signing."""
+    _p1(backend, P1_PATH, PATH)
+    _p1(backend, P1_METADATA, METADATA)
+    _p1(backend, P1_PACKED, _packed_for(call_data))
+
+    with pytest.raises(ExceptionRAPDU) as e:
+        backend.exchange(
+            cla=CLA, ins=InsType.HYBRID_SIGN_USEROP, p1=P1_CALLDATA, p2=0, data=call_data
+        )
+    assert e.value.status == Errors.SW_BLIND_SIGNING_DISABLED
+
+    # The accumulated UserOp was wiped: the sequence must restart from the path.
+    with pytest.raises(ExceptionRAPDU) as e:
+        backend.exchange(
+            cla=CLA, ins=InsType.HYBRID_SIGN_USEROP, p1=P1_CALLDATA, p2=0, data=call_data
+        )
+    assert e.value.status == Errors.SWO_INCORRECT_P1_P2
+
+
+@pytest.mark.usefixtures("blind_signing_enabled")
+@pytest.mark.parametrize(
+    "param", [MLDSAParam.MLDSA_44, MLDSAParam.MLDSA_65], ids=lambda p: p.name
+)
+def test_userop_unparsed_calldata_blind_signed_with_opt_in(
+    backend: BackendInterface, scenario_navigator: NavigateWithScenario, param: MLDSAParam
+) -> None:
+    """With the opt-in, the same UserOp goes through the blind-signing review
+    (warning page, then the userOpHash) and both halves still verify."""
+    client = BoilerplateCommandSender(backend)
+    packed = _packed_for(EXECUTE_BATCH_CALLDATA)
+
+    with client.hybrid_sign_userop(
+        path=PATH_STR,
+        metadata=METADATA,
+        packed=packed,
+        call_data=EXECUTE_BATCH_CALLDATA,
+        param=param,
+    ):
+        scenario_navigator.review_approve_with_warning(
+            test_name=f"userop_blind_sign_{param.name.lower()}"
+        )
+
+    response = client.get_async_response()
+    assert response is not None
+    der_sig_len, der_sig, _v = unpack_sign_tx_response(response.data)
+    assert der_sig_len == len(der_sig) and 8 <= der_sig_len <= 72
+
+    pk = client.get_mldsa_pk(param)
+    sig = client.get_mldsa_sig(param)
+    PUBKEY_CLS[param].from_public_bytes(pk).verify(sig, _userop_hash(METADATA, packed))

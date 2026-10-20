@@ -27,8 +27,15 @@
  *              If len > 0: device verifies keccak256(callData) == hashCallData and
  *              tries to parse `execute(address,uint256,bytes)` (selector 0xb61d27f6)
  *              to extract `call_to` and `call_value` for clear-signing.
- *              If len == 0: no callData verification; UI falls back to showing
- *              the userOpHash (blind).
+ *              If len == 0: no callData verification.
+ *
+ *              Only an execute(address,uint256,bytes) callData can be clear-
+ *              signed (To / Value). Anything else — callData withheld, or any
+ *              other call such as executeBatch — leaves nothing to show but the
+ *              userOpHash, which is blind signing: it is refused with
+ *              SW_BLIND_SIGNING_DISABLED unless the user enabled blind signing
+ *              in Settings, and otherwise reviewed behind the SDK blind-signing
+ *              warning.
  *
  *              Once callData is processed the device computes:
  *                userOpHash = keccak256(abi.encode(

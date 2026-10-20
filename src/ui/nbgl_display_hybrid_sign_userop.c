@@ -153,15 +153,27 @@ int ui_display_hybrid_sign_userop(void) {
     const char *sign_text = NULL;
 #endif
 
-    // When callData was parsed, this is a proper clear-sign flow; when not,
-    // it degrades to blind-sign of the userOpHash. NBGL's Review flow is fine
-    // in both cases — the pair list content differs, not the flow.
-    nbgl_useCaseReview(TYPE_TRANSACTION,
-                       &userop_pairList,
-                       &ICON_APP,
-                       review_text,
-                       NULL,
-                       sign_text,
-                       userop_review_choice);
+    if (userop_has_call_info()) {
+        // Clear signing: To / Value parsed from execute(address,uint256,bytes).
+        nbgl_useCaseReview(TYPE_TRANSACTION,
+                           &userop_pairList,
+                           &ICON_APP,
+                           review_text,
+                           NULL,
+                           sign_text,
+                           userop_review_choice);
+    } else {
+        // Only the userOpHash can be shown: blind signing. The handler only
+        // gets here when the user has opted in to blind signing; surface the
+        // SDK warning like every other blind flow of the app.
+        nbgl_useCaseReviewBlindSigning(TYPE_TRANSACTION,
+                                       &userop_pairList,
+                                       &ICON_APP,
+                                       review_text,
+                                       NULL,
+                                       sign_text,
+                                       NULL,
+                                       userop_review_choice);
+    }
     return 0;
 }

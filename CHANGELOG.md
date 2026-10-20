@@ -15,8 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cannot represent are refused with the new status word
   `SW_BLIND_SIGNING_DISABLED` (`0xB00A`) until the user enables it:
   `ECDSA_SIGN_HASH` (0x15), `HYBRID_SIGN_HASH` (0x16), `SIGN_DILITHIUM` (0x0F),
-  and `HYBRID_SIGN_USEROP` (0x17) **only** when the `callData` preimage is
-  withheld. A UserOp sent with its `callData` is clear-signed and keeps working
+  and `HYBRID_SIGN_USEROP` (0x17) whenever it cannot be clear-signed: `callData`
+  withheld, or any call other than `execute(address,uint256,bytes)` (e.g.
+  `executeBatch`), whose review would show only the userOpHash. With the opt-in
+  on, that review carries the SDK blind-signing warning. A UserOp whose
+  `callData` is an `execute` call is clear-signed (To, Value) and keeps working
   with the setting off.
 - `SET_SETTING` (0x0D), a test-only instruction for putting the device in a
   known settings state without driving the UI.

@@ -240,17 +240,21 @@ int handler_hybrid_sign_userop(buffer_t *cdata, uint8_t p1, MLDSA_param_t param)
 
             uint16_t remaining = cdata->size - cdata->offset;
 
-            // Withholding the callData preimage downgrades the review to the
-            // bare userOpHash, i.e. blind signing. Refuse unless the user has
-            // opted in, and wipe the accumulated UserOp on the way out.
-            if (remaining == 0 && !BLIND_SIGNING_ALLOWED()) {
-                explicit_bzero(&userop_ctx, sizeof(userop_ctx));
-                return io_send_sw(SW_BLIND_SIGNING_DISABLED);
-            }
-
             if (process_calldata(cdata->ptr + cdata->offset, remaining) != 0) {
                 explicit_bzero(&userop_ctx, sizeof(userop_ctx));
                 return io_send_sw(SWO_INCORRECT_DATA);
+            }
+
+            // Clear signing needs something to show: To/Value parsed from an
+            // execute(address,uint256,bytes) callData. Without it (callData
+            // withheld, or any other call such as executeBatch) the review falls
+            // back to the bare userOpHash, which is blind signing. Refuse unless
+            // the user has opted in, and wipe the accumulated UserOp. This is
+            // the same condition the review screen branches on
+            // (userop_has_call_info), so the gate and the screen cannot disagree.
+            if (!userop_ctx.has_call_info && !BLIND_SIGNING_ALLOWED()) {
+                explicit_bzero(&userop_ctx, sizeof(userop_ctx));
+                return io_send_sw(SW_BLIND_SIGNING_DISABLED);
             }
 
             if (compute_userop_hash() != 0) {
